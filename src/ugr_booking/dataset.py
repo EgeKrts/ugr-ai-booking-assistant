@@ -31,7 +31,8 @@ class DatasetSource:
         if self.root.is_dir():
             return self
         if not self.root.is_file():
-            raise DatasetError("Dataset path does not exist")
+            raise DatasetError(f"Dataset path does not exist: {self.root}. Put the dataset there "
+                               "(manifest.json, emails/, master_data/; or the ZIP), or use --dataset / DATASET_PATH.")
         try:
             self.archive = zipfile.ZipFile(self.root)
             self.kind = "zip"

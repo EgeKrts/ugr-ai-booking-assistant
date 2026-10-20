@@ -87,6 +87,19 @@ class IssueRow(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime)
 
 
+def require_existing_database(url: str | None = None) -> str:
+    """Return the URL, or raise if it is a SQLite file that does not exist yet.
+
+    Read-only commands use this so that asking about an empty setup never creates an empty database file.
+    """
+    url = url or DEFAULT_DATABASE_URL
+    parsed = make_url(url)
+    if parsed.get_backend_name() == "sqlite" and parsed.database not in (None, "", ":memory:"):
+        if not Path(parsed.database).is_file():
+            raise ValueError(f"No database file at {parsed.database}. Create it first with: python -m ugr_booking.cli ingest")
+    return url
+
+
 def make_engine(url: str | None = None) -> Engine:
     """Open (and create if needed) the database; the parent folder is created for file databases."""
     url = url or DEFAULT_DATABASE_URL

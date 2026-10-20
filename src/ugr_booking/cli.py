@@ -8,7 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 from .config import get_database_url, get_dataset_path
 from .dataset import DatasetError
-from .db import BookingRow, EmailRow, EventRow, IssueRow, make_engine
+from .db import BookingRow, EmailRow, EventRow, IssueRow, make_engine, require_existing_database
 from .extractor import ExtractionError, Extractor
 from .ingest import read_dataset_emails, read_inbox_emails
 from .master_data import MasterIndex, load_dataset
@@ -97,7 +97,7 @@ def _run_ingest(args, path: Path) -> int:
 
 
 def _list_bookings(args) -> int:
-    engine = make_engine(get_database_url(args.db))
+    engine = make_engine(require_existing_database(get_database_url(args.db)))
     with Session(engine) as session:
         bookings = session.scalars(select(BookingRow).order_by(BookingRow.id)).all()
         print(f"{'ID':<10}{'REF':<20}{'CUSTOMER':<22}{'POL>POD':<14}{'QTY':<5}{'DATE':<12}{'STATUS':<20}SOURCE")
@@ -117,7 +117,7 @@ def _list_bookings(args) -> int:
 
 
 def _report(args) -> int:
-    engine = make_engine(get_database_url(args.db))
+    engine = make_engine(require_existing_database(get_database_url(args.db)))
     with Session(engine) as session:
         rows = batch_report(session)
     print("| E-mail | Intent | Status | Bookings | Events | Blocking issues | Warnings |")
