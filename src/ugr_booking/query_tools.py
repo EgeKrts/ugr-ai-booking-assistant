@@ -221,6 +221,25 @@ def failed_actions(session: Session) -> list[dict]:
     return out
 
 
+def list_emails(session: Session, intents: tuple[str, ...] = (), text: str = "") -> list[dict]:
+    """Every processed e-mail (newest first), optionally narrowed by detected intent or a search text."""
+    query = select(EmailRow).order_by(EmailRow.received_at.desc(), EmailRow.email_id.desc())
+    if intents:
+        query = query.where(func.coalesce(EmailRow.intent, "NONE").in_(intents))
+    needle = text.strip()
+    if needle:
+        like = f"%{needle}%"
+        query = query.where(or_(EmailRow.email_id.ilike(like), EmailRow.subject.ilike(like),
+                                EmailRow.sender.ilike(like), EmailRow.clean_body.ilike(like)))
+    bookings: dict[str, list[str]] = {}
+    for booking_id, email_id in session.execute(select(BookingRow.id, BookingRow.source_email_id).order_by(BookingRow.id)):
+        bookings.setdefault(email_id, []).append(f"BKG-{booking_id:05d}")
+    return [{"email_id": e.email_id, "received_at": e.received_at, "sender": e.sender, "subject": e.subject,
+             "intent": e.intent or "NONE", "status": e.status, "outcome": e.outcome, "error": e.error,
+             "warnings": list(e.warnings or []), "bookings": bookings.get(e.email_id, []), "body": e.clean_body}
+            for e in session.scalars(query)]
+
+
 def get_booking_detail(session: Session, booking_id: int) -> BookingDetail | None:
     row = session.execute(_views_query(BookingFilter(text=f"BKG-{booking_id}"))).first()
     if row is None:

@@ -17,7 +17,7 @@ from ugr_booking.chatbot import ChatService, KeywordPlanner
 from ugr_booking.master_data import MasterIndex, load_dataset
 from ugr_booking.query_tools import (
     UNKNOWN_LABEL, BookingFilter, ORDERS, bookings_requiring_review, count_bookings, count_by, email_overview, failed_actions,
-    filter_options, get_booking_detail, open_issue_codes, search_bookings,
+    filter_options, get_booking_detail, list_emails, open_issue_codes, search_bookings,
 )
 
 STATUS_COLORS = {"READY": "#2e7d32", "VALIDATION_REQUIRED": "#c77700", "CANCELLED": "#6b7280", "ASSIGNED": "#1565c0"}
@@ -306,7 +306,7 @@ def main() -> None:
                 st.caption(f"The dashboard below follows this answer: filters applied, {len(focus['ids'])} booking(s) highlighted."
                            if focus["has_data"] else "No bookings matched, so the dashboard filters were left unchanged.")
 
-        overview, table, attention, chat = st.tabs(["Overview", "Bookings", "Needs attention", "Chat"])
+        overview, table, attention, email_tab, chat = st.tabs(["Overview", "Bookings", "Needs attention", "E-mails", "Chat"])
 
         with overview:
             cols = st.columns(4)
@@ -367,6 +367,33 @@ def main() -> None:
             st.dataframe(pd.DataFrame(sorted(mails["by_intent"].items()), columns=["Intent", "E-mails"]),
                          hide_index=True, use_container_width=True)
 
+
+        with email_tab:
+            st.caption("Every processed e-mail, including the ones that are not bookings. These filters apply only to this tab.")
+            left, right = st.columns([2, 3])
+            intents = left.multiselect("Detected intent", sorted(mails["by_intent"]), key="e_intents")
+            needle = right.text_input("Search", key="e_text", placeholder="e-mail id, subject, sender, text")
+            found = list_emails(session, tuple(intents), needle)
+            st.caption(f"{len(found)} of {mails['emails_total']} e-mails")
+            if found:
+                grid = pd.DataFrame([{"E-mail": m["email_id"], "Received": m["received_at"], "From": m["sender"] or "?",
+                                      "Subject": m["subject"], "Intent": m["intent"], "Status": m["status"],
+                                      "Bookings": ", ".join(m["bookings"])} for m in found])
+                pick = st.dataframe(grid, hide_index=True, use_container_width=True,
+                                    on_select="rerun", selection_mode="single-row", key="email_table")
+                rows = pick.selection.rows if pick is not None else []
+                if rows:
+                    mail = found[rows[0]]
+                    st.subheader(f"{mail['email_id']} - {mail['subject']}")
+                    if mail["outcome"]:
+                        st.write(f"**Outcome:** {mail['outcome']}")
+                    if mail["error"]:
+                        st.error(mail["error"])
+                    for warning in mail["warnings"]:
+                        st.warning(str(warning))
+                    st.text(mail["body"])
+            else:
+                st.caption("No e-mails match.")
 
         with chat:
             chat_tab(url)
