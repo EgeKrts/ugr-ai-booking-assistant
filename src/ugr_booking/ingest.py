@@ -113,6 +113,8 @@ def parse_email_text(text: str, entry: ManifestEntry, warnings: list[str] | None
     cleaned = clean_body(raw_body)
     if not cleaned.current_text:
         warnings.append("EMPTY_BODY")
+    if cleaned.suspicious_text:
+        warnings.append("PROMPT_INJECTION_SUSPECTED")
     if has_suspect_encoding(text):
         warnings.append("SUSPECT_ENCODING")
 
@@ -124,6 +126,7 @@ def parse_email_text(text: str, entry: ManifestEntry, warnings: list[str] | None
         raw_body=raw_body,
         clean_body=cleaned.current_text,
         quoted_body=cleaned.quoted_text,
+        suspicious_text=cleaned.suspicious_text,
         was_html=cleaned.was_html,
         file_name=entry.file,
         warnings=tuple(dict.fromkeys(warnings)),

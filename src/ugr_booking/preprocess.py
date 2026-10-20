@@ -9,6 +9,7 @@ _HTML_HINT = re.compile(r"<\s*/?\s*(html|body|div|p|br|span|b|i|table|tr|td|font
 _BLOCK_TAGS = {"br", "div", "p", "tr", "li", "table", "body", "html", "h1", "h2", "h3"}
 _SKIP_TAGS = {"script", "style", "head"}
 _LEADING_BREAK = re.compile(r"^[ \t]*\r?\n")
+_PARAGRAPH_BREAK = re.compile(r"\n[ \t]*\n")
 
 # Quoted history markers seen in operational mail clients. Only explicit
 # separators are recognised; ordinary sentences such as "Original booking was"
@@ -18,6 +19,16 @@ _QUOTE_START = re.compile(
 )
 _QUOTE_END = re.compile(
     r"(?im)^[ \t]*-{2,}[ \t]*end (previous message|original message|forwarded message)[ \t]*-{2,}[ \t]*$"
+)
+
+# Paragraphs that address the processing system instead of describing cargo.
+# They are withheld from the model and flagged; the raw body is kept for audit.
+_INSTRUCTION_LIKE = re.compile(
+    r"(?i)(\bsystem[ \t]+(note|prompt|message|instruction)s?\b"
+    r"|\bignore\b.{0,40}\b(rules?|instructions?|validation|previous)\b"
+    r"|\binvent\b.{0,30}\b(value|data|field)s?\b"
+    r"|\bdo not (tell|inform|mention)\b.{0,30}\buser\b"
+    r"|\boverride\b.{0,30}\b(rules?|validation|checks?)\b)"
 )
 
 # Replacement characters and typical UTF-8-read-as-Latin-1 artefacts.
@@ -78,6 +89,7 @@ class CleanBody:
     current_text: str
     quoted_text: str
     was_html: bool
+    suspicious_text: str = ""
 
 
 def split_quoted(text: str) -> tuple[str, str]:
@@ -104,11 +116,21 @@ def split_quoted(text: str) -> tuple[str, str]:
     return normalize_whitespace("\n".join(current)), normalize_whitespace("\n\n".join(quoted))
 
 
+def split_instruction_like(text: str) -> tuple[str, str]:
+    """Move blank-line separated paragraphs that talk to the system out of the body."""
+    kept: list[str] = []
+    withheld: list[str] = []
+    for paragraph in _PARAGRAPH_BREAK.split(text):
+        (withheld if _INSTRUCTION_LIKE.search(paragraph) else kept).append(paragraph.strip())
+    return "\n\n".join(p for p in kept if p), "\n\n".join(p for p in withheld if p)
+
+
 def clean_body(raw_body: str) -> CleanBody:
     was_html = looks_like_html(raw_body)
     text = html_to_text(raw_body) if was_html else raw_body
     current, quoted = split_quoted(normalize_whitespace(text))
-    return CleanBody(current, quoted, was_html)
+    current, suspicious = split_instruction_like(current)
+    return CleanBody(current, quoted, was_html, suspicious)
 
 
 def has_suspect_encoding(text: str) -> bool:
