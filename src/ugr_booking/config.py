@@ -10,3 +10,11 @@ def get_dataset_path(explicit_path: Path | None = None) -> Path:
         return explicit_path
     load_dotenv(Path.cwd() / ".env", override=False, encoding="utf-8-sig")
     return Path(os.environ.get("DATASET_PATH") or DEFAULT_DATASET_PATH)
+
+
+def get_database_url(explicit: str | None = None) -> str:
+    from .db import DEFAULT_DATABASE_URL
+    if explicit:
+        return explicit
+    load_dotenv(Path.cwd() / ".env", override=False, encoding="utf-8-sig")
+    return os.environ.get("DATABASE_URL") or DEFAULT_DATABASE_URL

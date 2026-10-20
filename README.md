@@ -4,15 +4,19 @@ The intended application turns booking e-mails into validated booking records,
 then provides an interactive dashboard and natural-language queries over the same
 stored data.
 
-**Current scope: step 1.2, dataset metadata and typed schemas.** The inspection
-command validates the manifest, referenced file paths and master data. E-mail
-body parsing starts in step 1.3; LLM, booking persistence and UI are later steps.
+**Current scope: backend complete through step 4.** E-mails are parsed, read by a local
+LLM, checked by deterministic rules and applied to a SQLite database through controlled
+tools. The dashboard (step 5) and chatbot (step 6) are not built yet.
+
+```text
+E-mail -> preprocess -> LLM extraction -> validation -> tool policy gate -> SQLite
+```
 
 ## Prerequisites
 
 - Python 3.11 or 3.12 (development environment: Python 3.12).
 - Git.
-- An LLM provider will be selected during the extraction milestone.
+- [Ollama](https://ollama.com) with the `qwen3:8b` model (`ollama pull qwen3:8b`); about 6 GB of GPU memory is enough.
 
 ## Setup (Windows PowerShell)
 
@@ -50,13 +54,30 @@ choose an explicit source. The command prints a JSON summary and exits with 0
 on success or 1 on a controlled package-validation failure. It does not read
 e-mail bodies, create bookings or call an external service.
 
+## Commands
+
+```powershell
+$py = ".\.venv\Scripts\python.exe"
+& $py -m ugr_booking.cli inspect-dataset          # manifest + master data checks
+& $py -m ugr_booking.cli parse-emails             # read and clean all e-mails (no model)
+& $py -m ugr_booking.cli extract  EMAIL-017       # model output for one e-mail, nothing saved
+& $py -m ugr_booking.cli validate EMAIL-019       # model + business rules, nothing saved
+& $py -m ugr_booking.cli ingest                   # all e-mails into data/booking.sqlite3
+& $py -m ugr_booking.cli ingest --planner llm --only EMAIL-008 EMAIL-012 EMAIL-013
+& $py -m ugr_booking.cli list-bookings --events   # what is stored
+& $py -m pytest -q                                # tests need no model
+```
+
+`ingest` is repeatable: e-mails already stored are skipped, so a second run adds nothing.
+Details: [extraction](docs/step_2.md), [validation](docs/step_3.md), [persistence and tools](docs/step_4.md).
+
 ## Configuration and private data
 
 `.env.example` contains placeholder names only. Dataset selection follows
 `--dataset`, then `DATASET_PATH`, then the default directory below. The command
 loads only the working directory's `.env`; existing environment variables win.
-Provider/model selection is still pending; API/database variables are placeholders
-for later steps. No API key is needed for metadata inspection.
+`OLLAMA_URL` / `OLLAMA_MODEL` select the local model and `DATABASE_URL` the database
+(default `sqlite:///data/booking.sqlite3`, ignored by Git). No API key is needed anywhere.
 
 The intended dataset location is:
 
@@ -78,9 +99,9 @@ See [step 1.2 and its limits](docs/step_1_2.md).
 ## Project layout
 
 ```text
-src/ugr_booking/   Python application package; modules added step by step
+src/ugr_booking/   Python application package (ingest, extractor, validators, tools, orchestrator)
 ui/               Future Streamlit entry point
-tests/            Metadata, path safety and schema tests
+tests/            Unit and end-to-end tests with invented fixtures (no model needed)
 docs/             Decision notes (architecture diagram lives in this README)
 data/private/     Local inputs, excluded from Git
 ```
