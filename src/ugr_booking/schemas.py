@@ -179,3 +179,49 @@ def describe_validation_error(exc: ValidationError) -> str:
         f"{'.'.join(map(str, e['loc'])) or '<root>'}: {e['msg']}"
         for e in exc.errors(include_input=False)
     )
+
+
+class Severity(StrEnum):
+    ERROR = "ERROR"      # blocks READY; a person must look at it
+    WARNING = "WARNING"  # worth showing, does not block
+    INFO = "INFO"
+
+
+class ValidationIssue(InputModel):
+    """A stable code plus the field it concerns; booking_index None means the whole e-mail."""
+    code: StrictStr = Field(min_length=1)
+    field: StrictStr | None = None
+    message: StrictStr
+    severity: Severity = Severity.ERROR
+    booking_index: StrictInt | None = None
+
+
+class ValidatedBooking(InputModel):
+    """Trusted values only in `draft`; what the model wrote stays in `raw`."""
+    booking_index: StrictInt
+    draft: BookingDraft
+    raw: ExtractedBooking
+    issues: tuple[ValidationIssue, ...] = ()
+
+    @property
+    def has_errors(self) -> bool:
+        return any(item.severity == Severity.ERROR for item in self.issues)
+
+
+class ValidationResult(InputModel):
+    email_id: StrictStr
+    intent: MessageIntent
+    bookings: tuple[ValidatedBooking, ...] = ()
+    target_booking_ref: StrictStr | None = None
+    email_issues: tuple[ValidationIssue, ...] = ()
+    message_notes: StrictStr | None = None
+
+    @property
+    def all_issues(self) -> tuple[ValidationIssue, ...]:
+        return self.email_issues + tuple(i for b in self.bookings for i in b.issues)
+
+    @property
+    def action_unresolved(self) -> bool:
+        """UPDATE/CANCEL without a usable reference: record it, never create a booking."""
+        return self.intent in (MessageIntent.UPDATE_BOOKING, MessageIntent.CANCEL_BOOKING) \
+            and self.target_booking_ref is None

@@ -8,7 +8,8 @@ from .config import get_dataset_path
 from .dataset import DatasetError
 from .extractor import ExtractionError, Extractor
 from .ingest import read_dataset_emails
-from .master_data import load_dataset
+from .master_data import MasterIndex, load_dataset
+from .validators import validate_extraction
 
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description="UGR booking utilities")
@@ -20,9 +21,27 @@ def main(argv=None) -> int:
     extract = commands.add_parser("extract", help="Run the LLM on one e-mail and print the unvalidated result (nothing is saved)")
     extract.add_argument("email_id", help="For example EMAIL-017")
     extract.add_argument("--dataset", type=Path, help="Extracted dataset directory or original ZIP")
+    validate = commands.add_parser("validate", help="Extract with the LLM, then apply the business rules (nothing is saved)")
+    validate.add_argument("email_id", help="For example EMAIL-019")
+    validate.add_argument("--dataset", type=Path, help="Extracted dataset directory or original ZIP")
     args = parser.parse_args(argv)
     try:
         path = get_dataset_path(args.dataset)
+        if args.command == "validate":
+            dataset = load_dataset(path)
+            records = {record.email_id: record for record in read_dataset_emails(path).records}
+            if args.email_id not in records:
+                raise ValueError(f"Unknown or unreadable e-mail: {args.email_id}")
+            record = records[args.email_id]
+            try:
+                extraction = Extractor().extract(record)
+            except ExtractionError as exc:
+                print(json.dumps({"email_id": record.email_id, "extraction_error": str(exc)}, indent=2, ensure_ascii=False))
+                return 1
+            result = validate_extraction(record, extraction, MasterIndex.from_dataset(dataset))
+            print(json.dumps(result.model_dump(mode="json", exclude={"bookings": {"__all__": {"raw": True}}}, exclude_none=True),
+                             indent=2, ensure_ascii=False))
+            return 0
         if args.command == "extract":
             records = {record.email_id: record for record in read_dataset_emails(path).records}
             if args.email_id not in records:
