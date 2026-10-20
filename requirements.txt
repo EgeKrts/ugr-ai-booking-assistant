@@ -1,0 +1,5 @@
+pydantic==2.14.1
+SQLAlchemy==2.1.5
+streamlit==1.66.0
+pytest==9.1.1
+python-dotenv==1.2.4

@@ -1,0 +1,34 @@
+# Local environment and credentials
+.venv/
+.env
+.env.*
+!.env.example
+
+# Python/build/test artifacts
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.coverage
+htmlcov/
+build/
+dist/
+.cache/
+
+# Private inputs, generated databases and logs
+data/private/*
+!data/private/.gitkeep
+*.zip
+*.pdf
+*.db
+*.db-*
+*.sqlite*
+*.log
+logs/
+tmp/
+
+# Editor and OS metadata
+.vscode/
+.idea/
+Thumbs.db
+.DS_Store
