@@ -29,15 +29,15 @@ RULES
 - The CURRENT MESSAGE holds the latest instruction. QUOTED HISTORY is older context: never use it as the instruction, and do not copy its values unless the current message points to them.
 - If the sender corrects a value inside the current message, use the final corrected value.
 - weight_text and dimensions_text: copy the original text including its unit or its absence.
-- requested_date_text: copy the date or period phrase exactly (for example "10/10/2026" or "SEPTEMBER SAILING"); null if none.
+- requested_date_text: copy the date or period phrase exactly (for example "10/10/2026", "SEPTEMBER SAILING" or "next available after 25/11/2026"); null if none. If one line says null/none and another line (for example Sailing) gives a date or a condition, copy that other line. A relative phrase such as "next week" is copied as written.
 - quantity is the number of units asked for, only if stated; vin_list contains exactly the VINs written in the message.
 
 INTENT (pick one)
-- CREATE_BOOKING: a new booking request. One entry in bookings per separate booking; two distinct requests in one e-mail give two entries.
-- UPDATE_BOOKING: change to an existing booking. Put the booking reference in target_booking_ref and only the changed values in bookings[0].
+- CREATE_BOOKING: a request to arrange or create a booking, even if details are missing or are said to be in an attachment (then fill only what is written and leave the rest null). One entry in bookings per separate booking; two distinct requests in one e-mail give two entries.
+- UPDATE_BOOKING: a change to a booking that was requested earlier (wording like change, correction, revised, replace, update). Put the booking reference in target_booking_ref and only the changed values in bookings[0]. A message that itself carries the booking details and is a booking request is CREATE_BOOKING, even when it contains a correction note: then use the corrected value in the booking.
 - CANCEL_BOOKING: cancel an existing booking. Put the reference in target_booking_ref; bookings stays empty.
 - STATUS_INQUIRY: asks about the status of a booking; put the reference in target_booking_ref; bookings stays empty.
-- NON_BOOKING: no booking action (price discussion, load list, greeting, other); bookings stays empty.
+- NON_BOOKING: nobody asks to book anything (price or rate discussion, load list, greeting, other); bookings stays empty. A message that asks to arrange a booking is never NON_BOOKING, however little detail it contains.
 - UNKNOWN: you cannot tell, or there is no readable content; bookings stays empty.
 FIELD HINTS
 - customer is the company the booking is for (a Customer line, a phrase like "for XYZ Lojistik", a signature, or the sender's company). contact_name is only a person.
@@ -47,6 +47,18 @@ FIELD HINTS
 EXAMPLE (invented)
 E-mail: "Booking please. ACME Cars / POL ROTTERDAM / POD DAKAR / 2 x USED VAN / Weight 3 500 kg each / Dims 5,2 x 2 x 2,1 m / VIN: ZZTEST001, ZZTEST002 / Sailing 5th November"
 Result: intent CREATE_BOOKING; bookings[0]: customer "ACME Cars", pol "ROTTERDAM", pod "DAKAR", cargo_description "2 x USED VAN", quantity 2, vin_list ["ZZTEST001","ZZTEST002"], weight_text "3 500 kg each", dimensions_text "5,2 x 2 x 2,1 m", requested_date_text "5th November"; every other field null.
+
+EXAMPLE 2 (invented): "Subject: RE: REF-77 resend. Resending because we are not sure the first mail arrived. Customer: Acme Cars, Booking Ref: REF-77, POL ROTTERDAM, POD DAKAR, Cargo: 2 x USED VAN, VIN: ZZTEST001, ZZTEST002."
+Result: intent CREATE_BOOKING with booking_ref REF-77 and all the details. A resent full booking request is a CREATE, not an update; repeats are detected later by the system.
+
+EXAMPLE 3 (invented): "Subject: Booking request REF-88. Customer: Acme Cars, POL ROTTERDAM, POD DAKAR, Cargo: 1 x USED VAN. Please note correction below: POD should be LAGOS, not DAKAR."
+Result: intent CREATE_BOOKING, pod "LAGOS" (the corrected value). A correction written inside a message that carries the whole booking does not make it an update.
+
+EXAMPLE 4 (invented): "Subject: CHANGE REQUEST REF-12. Please change the POL of REF-12 to VALENCIA."
+Result: intent UPDATE_BOOKING, target_booking_ref REF-12, bookings[0].pol "VALENCIA", every other field null.
+
+EXAMPLE 5 (invented): "Subject: Update REF-9. Original booking was 8 units. Please reduce to 6 units. Remove these VINs: ZZTEST007, ZZTEST008."
+Result: intent UPDATE_BOOKING, target_booking_ref REF-9, bookings[0].quantity 6 (the NEW value, never the original one), every other field null.
 
 Only CREATE_BOOKING may produce entries in bookings as new bookings. A missing reference on UPDATE/CANCEL stays null; never invent one."""
 

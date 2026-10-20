@@ -12,7 +12,9 @@ from .db import BookingRow, EmailRow, EventRow, IssueRow, make_engine
 from .extractor import ExtractionError, Extractor
 from .ingest import read_dataset_emails
 from .master_data import MasterIndex, load_dataset
+from .query_tools import batch_report
 from .orchestrator import DirectPlanner, LLMPlanner, Orchestrator
+from .recorded import RecordedExtractor, record_extractions
 from .validators import validate_extraction
 
 
@@ -51,6 +53,13 @@ def build_parser() -> argparse.ArgumentParser:
     ingest.add_argument("--planner", choices=("direct", "llm"), default="direct",
                         help="direct = fixed rules choose the tool calls; llm = the model chooses them (still policy-checked)")
     ingest.add_argument("--only", nargs="+", metavar="EMAIL_ID", help="Process only these e-mails")
+    ingest.add_argument("--extractions", type=Path, metavar="DIR",
+                        help="Replay recorded model output instead of calling the model (offline demo / regression)")
+    record = commands.add_parser("record-extractions", help="Run the model on every e-mail and save its output for later replay")
+    _add_dataset(record)
+    record.add_argument("--out", type=Path, default=Path("data/private/extractions"), help="Directory for the recording")
+    report = commands.add_parser("report", help="Markdown report of every e-mail's outcome from the database")
+    report.add_argument("--db", help="Database URL")
     listing = commands.add_parser("list-bookings", help="Show stored bookings, events and open issues")
     listing.add_argument("--db", help="Database URL")
     listing.add_argument("--events", action="store_true", help="Also list booking events")
@@ -69,7 +78,12 @@ def _run_ingest(args, path: Path) -> int:
     master = MasterIndex.from_dataset(load_dataset(path))
     engine = make_engine(get_database_url(args.db))
     planner = LLMPlanner() if args.planner == "llm" else DirectPlanner()
-    orchestrator = Orchestrator(engine, Extractor(), master, planner)
+    extractor = Extractor()
+    if args.extractions:
+        extractor = RecordedExtractor(args.extractions)
+        print(f"*** REPLAY, not live AI: {extractor.describe()} ***", flush=True)
+        print(flush=True)
+    orchestrator = Orchestrator(engine, extractor, master, planner)
     report = orchestrator.ingest(emails, on_email=lambda o: print(o.line(), flush=True))
     report.unreadable = 0 if args.only else len(ingest_report.failures)
     print()
@@ -97,6 +111,18 @@ def _list_bookings(args) -> int:
     return 0
 
 
+def _report(args) -> int:
+    engine = make_engine(get_database_url(args.db))
+    with Session(engine) as session:
+        rows = batch_report(session)
+    print("| E-mail | Intent | Status | Bookings | Events | Blocking issues | Warnings |")
+    print("|---|---|---|---|---|---|---|")
+    for r in rows:
+        print(f"| {r['email_id']} | {r['intent']} | {r['status']} | {', '.join(r['bookings']) or '-'} | "
+              f"{', '.join(r['events']) or '-'} | {', '.join(r['error_codes']) or '-'} | {', '.join(r['warnings']) or '-'} |")
+    return 0
+
+
 def main(argv=None) -> int:
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8")
@@ -104,9 +130,19 @@ def main(argv=None) -> int:
     try:
         if args.command == "list-bookings":
             return _list_bookings(args)
+        if args.command == "report":
+            return _report(args)
         path = get_dataset_path(args.dataset)
         if args.command == "ingest":
             return _run_ingest(args, path)
+        if args.command == "record-extractions":
+            emails = list(read_dataset_emails(path).records)
+            def show(email_id, payload, seconds):
+                print(f"{email_id}  {'ERROR ' + payload['error'] if 'error' in payload else payload['result']['intent']}  {seconds}s", flush=True)
+            summary = record_extractions(emails, Extractor(), args.out, on_email=show)
+            print()
+            print(f"recorded {summary.recorded}, errors {summary.errors}, {summary.seconds}s -> {args.out}")
+            return 0 if summary.errors == 0 else 1
         if args.command == "parse-emails":
             report = read_dataset_emails(path)
             _dump(report.summary())

@@ -266,3 +266,21 @@ def open_issue_codes(session: Session) -> dict[int, list[str]]:
         if codes:
             out[booking_id] = codes
     return out
+
+
+def batch_report(session: Session) -> list[dict]:
+    """One row per e-mail: what it was read as, what happened, which bookings and events it touched."""
+    issues: dict[str, set[str]] = {}
+    for email_id, code in session.execute(select(IssueRow.email_id, IssueRow.code).where(IssueRow.severity == "ERROR")):
+        issues.setdefault(email_id, set()).add(code)
+    events: dict[str, list[str]] = {}
+    for event in session.scalars(select(EventRow).order_by(EventRow.id)):
+        label = event.event_type + (f"->BKG-{event.booking_id:05d}" if event.booking_id else "")
+        events.setdefault(event.source_email_id, []).append(label)
+    bookings: dict[str, list[str]] = {}
+    for booking in session.scalars(select(BookingRow).order_by(BookingRow.id)):
+        bookings.setdefault(booking.source_email_id, []).append(f"{booking.display_id} ({booking.status})")
+    return [{"email_id": e.email_id, "received_at": e.received_at, "intent": e.intent, "status": e.status,
+             "bookings": bookings.get(e.email_id, []), "events": events.get(e.email_id, []),
+             "error_codes": sorted(issues.get(e.email_id, [])), "warnings": list(e.warnings or []), "error": e.error}
+            for e in session.scalars(select(EmailRow).order_by(EmailRow.received_at, EmailRow.email_id))]

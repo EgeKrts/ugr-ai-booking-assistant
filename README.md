@@ -65,9 +65,13 @@ $py = ".\.venv\Scripts\python.exe"
 & $py -m ugr_booking.cli ingest                   # all e-mails into data/booking.sqlite3
 & $py -m ugr_booking.cli ingest --planner llm --only EMAIL-008 EMAIL-012 EMAIL-013
 & $py -m ugr_booking.cli list-bookings --events   # what is stored
+& $py -m ugr_booking.cli report                   # Markdown: every e-mail's outcome, bookings and events
+& $py -m ugr_booking.cli record-extractions       # save the model's output for all e-mails (data/private/extractions)
+& $py -m ugr_booking.cli ingest --extractions data/private/extractions   # offline replay, labelled as not live AI
 & $py -m streamlit run ui/app.py                  # dashboard on http://localhost:8501
 $env:UGR_CHAT_PLANNER = "keywords"                 # optional: chat without the language model
 & $py -m pytest -q                                # tests need no model
+& $py -m pytest --live -q                          # also the regression checks that call the real model
 ```
 
 Example chat questions: *How many bookings does ABC Shipping have?* - *Show bookings with Izmir as the port of
@@ -79,7 +83,7 @@ recently (not processing time); **cancelled bookings are counted** and the answe
 status `VALIDATION_REQUIRED`; non-booking e-mails are never counted as bookings.
 
 `ingest` is repeatable: e-mails already stored are skipped, so a second run adds nothing.
-Details: [extraction](docs/step_2.md), [validation](docs/step_3.md), [persistence and tools](docs/step_4.md), [dashboard](docs/step_5.md), [chatbot](docs/step_6.md).
+Details: [extraction](docs/step_2.md), [validation](docs/step_3.md), [persistence and tools](docs/step_4.md), [dashboard](docs/step_5.md), [chatbot](docs/step_6.md), [test and batch run record](docs/run_record.md).
 
 ## Configuration and private data
 

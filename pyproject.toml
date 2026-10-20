@@ -18,3 +18,4 @@ where = ["src"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-ra"
+markers = ["live: calls the local language model (run with --live)"]
