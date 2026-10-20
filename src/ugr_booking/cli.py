@@ -6,6 +6,7 @@ import sys
 import zipfile
 from .config import get_dataset_path
 from .dataset import DatasetError
+from .extractor import ExtractionError, Extractor
 from .ingest import read_dataset_emails
 from .master_data import load_dataset
 
@@ -16,9 +17,24 @@ def main(argv=None) -> int:
     inspect.add_argument("--dataset", type=Path, help="Extracted dataset directory or original ZIP")
     parse = commands.add_parser("parse-emails", help="Parse and clean every manifest e-mail; prints IDs and warning codes only")
     parse.add_argument("--dataset", type=Path, help="Extracted dataset directory or original ZIP")
+    extract = commands.add_parser("extract", help="Run the LLM on one e-mail and print the unvalidated result (nothing is saved)")
+    extract.add_argument("email_id", help="For example EMAIL-017")
+    extract.add_argument("--dataset", type=Path, help="Extracted dataset directory or original ZIP")
     args = parser.parse_args(argv)
     try:
         path = get_dataset_path(args.dataset)
+        if args.command == "extract":
+            records = {record.email_id: record for record in read_dataset_emails(path).records}
+            if args.email_id not in records:
+                raise ValueError(f"Unknown or unreadable e-mail: {args.email_id}")
+            record = records[args.email_id]
+            output = {"email_id": record.email_id, "warnings": list(record.warnings)}
+            try:
+                output["extraction"] = Extractor().extract(record).model_dump(mode="json")
+            except ExtractionError as exc:
+                output["extraction_error"] = str(exc)
+            print(json.dumps(output, indent=2, ensure_ascii=False))
+            return 1 if "extraction_error" in output else 0
         if args.command == "parse-emails":
             report = read_dataset_emails(path)
             print(json.dumps(report.summary(), indent=2, ensure_ascii=True))
