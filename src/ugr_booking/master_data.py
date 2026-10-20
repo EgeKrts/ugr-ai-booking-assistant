@@ -98,6 +98,7 @@ class MasterIndex:
     def __init__(self, customers: Iterable[Customer], ports: Iterable[Port]):
         self._customers = self._build((c.name, [c.name, *c.aliases]) for c in customers)
         self._ports = self._build((p.port_code, [p.port_code, p.name, *p.aliases]) for p in ports)
+        self.port_names = {p.port_code: p.name for p in ports}
 
     @staticmethod
     def _build(items) -> dict[str, set[str]]:
@@ -134,3 +135,26 @@ class MasterIndex:
             if found:
                 return MatchResult("ambiguous", None, tuple(found))
         return whole
+
+
+    def find_in_text(self, text: str) -> tuple[list[tuple[str, int, int]], list[tuple[str, int, int]]]:
+        """Customers and ports named in free text: ([(customer, start, end)], [(port code, start, end)]).
+
+        Positions refer to fold(text). Only whole-word exact aliases count, longest first, no overlaps.
+        """
+        folded = fold(text)
+        taken: list[tuple[int, int]] = []
+        found = {"customers": [], "ports": []}
+        for kind, index in (("customers", self._customers), ("ports", self._ports)):
+            for key in sorted(index, key=len, reverse=True):
+                if not key:
+                    continue
+                for match in re.finditer(rf"(?<![0-9a-z]){re.escape(key)}(?![0-9a-z])", folded):
+                    span = (match.start(), match.end())
+                    if any(span[0] < end and start < span[1] for start, end in taken):
+                        continue
+                    hits = index[key]
+                    if len(hits) == 1:
+                        taken.append(span)
+                        found[kind].append((next(iter(hits)), *span))
+        return sorted(found["customers"], key=lambda x: x[1]), sorted(found["ports"], key=lambda x: x[1])

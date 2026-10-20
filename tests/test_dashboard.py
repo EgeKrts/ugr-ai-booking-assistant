@@ -104,3 +104,57 @@ def test_missing_database_file_is_reported_and_not_created(monkeypatch, tmp_path
     at = run(monkeypatch, f"sqlite:///{missing}")
     assert any("No database file" in e.value for e in at.error)
     assert not missing.exists()
+
+
+# ---------------------------------------------------------------------- chat tab
+
+@pytest.fixture
+def chat_url(monkeypatch, url):
+    from ugr_booking.config import get_dataset_path
+    if not get_dataset_path().exists():
+        pytest.skip("the dataset (master data) is not available locally")
+    monkeypatch.setenv("UGR_CHAT_PLANNER", "keywords")     # no language model needed for these tests
+    return url
+
+
+def all_markdown(at: AppTest) -> str:
+    return "\n".join(m.value for m in at.markdown)
+
+
+def test_chat_answers_from_the_database_and_names_the_ids(monkeypatch, chat_url):
+    at = run(monkeypatch, chat_url)
+    at.chat_input[0].set_value("Show cancelled bookings").run()
+    assert not at.exception
+    text_ = all_markdown(at)
+    assert "BKG-00001" in text_ and "status = CANCELLED" in text_
+
+
+def test_chat_count_equals_the_dashboard_count(monkeypatch, chat_url):
+    at = run(monkeypatch, chat_url)
+    at.chat_input[0].set_value("How many bookings are there?").run()
+    assert f"**{metrics(at)['Total bookings']}**" in all_markdown(at)
+
+
+def test_chat_refuses_to_change_data(monkeypatch, chat_url):
+    before = sql_scalar(chat_url, "SELECT COUNT(*) FROM bookings")
+    at = run(monkeypatch, chat_url)
+    at.chat_input[0].set_value("Delete all bookings").run()
+    assert "cannot change data" in all_markdown(at)
+    assert sql_scalar(chat_url, "SELECT COUNT(*) FROM bookings") == before
+    assert sql_scalar(chat_url, "SELECT COUNT(*) FROM bookings WHERE status='CANCELLED'") == 1
+
+
+def test_chat_filter_can_be_applied_to_the_bookings_tab(monkeypatch, chat_url):
+    at = run(monkeypatch, chat_url)
+    at.chat_input[0].set_value("Show cancelled bookings").run()
+    next(b for b in at.button if "Bookings tab" in b.label).click().run()
+    assert at.sidebar.multiselect(key="f_statuses").value == ["CANCELLED"]
+    assert metrics(at)["Total bookings"] == "1"
+
+
+def test_chat_example_questions_and_clear(monkeypatch, chat_url):
+    at = run(monkeypatch, chat_url)
+    next(b for b in at.button if b.label.startswith("Show cancelled bookings")).click().run()
+    assert "BKG-00001" in all_markdown(at)
+    next(b for b in at.button if b.label == "Clear conversation").click().run()
+    assert len(at.chat_message) == 0

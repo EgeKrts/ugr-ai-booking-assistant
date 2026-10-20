@@ -4,6 +4,7 @@ Everything shown is read from the SQLite database on each interaction; no figure
 """
 from __future__ import annotations
 from datetime import date
+import os
 from pathlib import Path
 import altair as alt
 import pandas as pd
@@ -12,7 +13,8 @@ from sqlalchemy.engine import make_url
 from sqlalchemy.orm import Session
 from ugr_booking.config import get_database_url, get_dataset_path
 from ugr_booking.db import make_engine
-from ugr_booking.master_data import load_dataset
+from ugr_booking.chatbot import ChatService, KeywordPlanner
+from ugr_booking.master_data import MasterIndex, load_dataset
 from ugr_booking.query_tools import (
     BookingFilter, ORDERS, bookings_requiring_review, count_bookings, count_by, email_overview, failed_actions,
     filter_options, get_booking_detail, open_issue_codes, search_bookings,
@@ -48,6 +50,74 @@ def port_label(code: str | None) -> str:
 
 def port_axis_label(value: str) -> str:
     return value if value == "(unknown)" else port_label(value)
+
+
+EXAMPLE_QUESTIONS = (
+    "How many bookings does ABC Shipping have?", "Show bookings with Izmir as the port of loading.",
+    "Which bookings require validation?", "Summarize the latest three bookings.",
+    "What is the status of BOOKINGREF-D100?", "Show cancelled bookings.",
+    "Show bookings for a non-existing customer called Foo Corp.")
+
+
+@st.cache_resource(show_spinner=False)
+def chat_service(url: str):
+    """The chatbot needs the master data (customer/port aliases); returns None if the package is missing."""
+    try:
+        master = MasterIndex.from_dataset(load_dataset(get_dataset_path()))
+    except Exception:
+        return None
+    planner = KeywordPlanner(master) if os.environ.get("UGR_CHAT_PLANNER") == "keywords" else None
+    return ChatService(engine_for(url), master, planner=planner)
+
+
+def apply_to_bookings_tab(flt: BookingFilter, options: dict[str, list[str]]) -> None:
+    """Copy a chat filter into the sidebar widgets (only values that exist in the data)."""
+    keep = lambda values, key: [v for v in values if v in options[key]]
+    st.session_state["f_customers"] = keep(flt.customers, "customers")
+    st.session_state["f_pols"] = keep(flt.pols, "pols")
+    st.session_state["f_pods"] = keep(flt.pods, "pods")
+    st.session_state["f_statuses"] = keep(flt.statuses, "statuses")
+    st.session_state["f_text"] = flt.text
+
+
+def chat_tab(url: str, options: dict[str, list[str]]) -> None:
+    service = chat_service(url)
+    st.caption("Answers come only from the booking database and are built from the matching rows. "
+               "This assistant is read-only: it cannot change, create or cancel anything.")
+    if service is None:
+        st.warning("The chat needs the master data (customer and port aliases). Put the dataset in "
+                   "`data/private/dataset` or set `DATASET_PATH`.")
+        return
+    history = st.session_state.setdefault("chat", [])
+    st.markdown("**Try a question**")
+    for column, question in zip(st.columns(2), (EXAMPLE_QUESTIONS[:4], EXAMPLE_QUESTIONS[4:]), strict=False):
+        for q in question:
+            if column.button(q, key=f"ex_{q}", use_container_width=True):
+                st.session_state["pending_question"] = q
+    typed = st.chat_input("Ask about the bookings, for example: Show bookings with Izmir as the port of loading")
+    question = typed or st.session_state.pop("pending_question", None)
+    if question:
+        with st.spinner("Reading the question and querying the database..."):
+            history.append({"question": question, "answer": service.ask(question)})
+    if history and st.button("Clear conversation", key="clear_chat"):
+        st.session_state["chat"] = []
+        st.rerun()
+    for index, turn in enumerate(reversed(history)):
+        answer = turn["answer"]
+        with st.chat_message("user"):
+            st.write(turn["question"])
+        with st.chat_message("assistant"):
+            st.markdown(answer.text)
+            for note in answer.notes:
+                st.caption(note)
+            with st.expander("How the question was read"):
+                st.caption(f"Interpreted by: {answer.interpreter}")
+                if answer.plan is not None:
+                    st.json(answer.plan.model_dump(mode="json", exclude_none=True))
+            expressible = answer.filter is not None and not answer.filter.ports_either and not answer.filter.is_empty                 and answer.has_data
+            if expressible:
+                st.button("Show these in the Bookings tab", key=f"apply_{index}", on_click=apply_to_bookings_tab,
+                          args=(answer.filter, options), help="Sets the sidebar filters to this question's filters.")
 
 
 def database_ready(url: str) -> str | None:
@@ -194,7 +264,7 @@ def main() -> None:
         st.caption(f"Database: `{url}` - showing {shown} of {total_all} bookings"
                    + ("" if flt.is_empty else " (filters active)"))
 
-        overview, table, attention = st.tabs(["Overview", "Bookings", "Needs attention"])
+        overview, table, attention, chat = st.tabs(["Overview", "Bookings", "Needs attention", "Chat"])
 
         with overview:
             cols = st.columns(4)
@@ -254,6 +324,10 @@ def main() -> None:
             st.subheader("E-mails by detected intent")
             st.dataframe(pd.DataFrame(sorted(mails["by_intent"].items()), columns=["Intent", "E-mails"]),
                          hide_index=True, use_container_width=True)
+
+
+        with chat:
+            chat_tab(url, filter_options(session))
 
 
 main()

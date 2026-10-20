@@ -6,7 +6,7 @@ stored data.
 
 **Current scope: backend complete through step 4.** E-mails are parsed, read by a local
 LLM, checked by deterministic rules and applied to a SQLite database through controlled
-tools. An interactive dashboard reads the same database; the chatbot (step 6) is not built yet.
+tools. An interactive dashboard and a read-only chatbot answer from the same database.
 
 ```text
 E-mail -> preprocess -> LLM extraction -> validation -> tool policy gate -> SQLite
@@ -66,11 +66,20 @@ $py = ".\.venv\Scripts\python.exe"
 & $py -m ugr_booking.cli ingest --planner llm --only EMAIL-008 EMAIL-012 EMAIL-013
 & $py -m ugr_booking.cli list-bookings --events   # what is stored
 & $py -m streamlit run ui/app.py                  # dashboard on http://localhost:8501
+$env:UGR_CHAT_PLANNER = "keywords"                 # optional: chat without the language model
 & $py -m pytest -q                                # tests need no model
 ```
 
+Example chat questions: *How many bookings does ABC Shipping have?* - *Show bookings with Izmir as the port of
+loading.* - *Which bookings require validation?* - *Summarize the latest three bookings.* - *What is the status of
+BOOKINGREF-D100?* - *Show cancelled bookings.*
+
+Definitions used by the dashboard and the chatbot: **latest** = the booking whose request e-mail arrived most
+recently (not processing time); **cancelled bookings are counted** and the answer says so; **needs validation** =
+status `VALIDATION_REQUIRED`; non-booking e-mails are never counted as bookings.
+
 `ingest` is repeatable: e-mails already stored are skipped, so a second run adds nothing.
-Details: [extraction](docs/step_2.md), [validation](docs/step_3.md), [persistence and tools](docs/step_4.md), [dashboard](docs/step_5.md).
+Details: [extraction](docs/step_2.md), [validation](docs/step_3.md), [persistence and tools](docs/step_4.md), [dashboard](docs/step_5.md), [chatbot](docs/step_6.md).
 
 ## Configuration and private data
 

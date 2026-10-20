@@ -11,7 +11,7 @@ Definitions used everywhere:
 - "Needs review" means status VALIDATION_REQUIRED.
 """
 from __future__ import annotations
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import date, datetime
 import re
 from typing import Any
@@ -34,6 +34,7 @@ class BookingFilter:
     text: str = ""                 # booking ref, BKG-id, source e-mail, customer or cargo
     date_from: date | None = None  # requested date range; bookings without a date are then excluded
     date_to: date | None = None
+    ports_either: tuple[str, ...] = ()   # a port that may be either the loading or the discharge port
 
     @property
     def is_empty(self) -> bool:
@@ -94,6 +95,8 @@ def conditions(flt: BookingFilter) -> list:
         out.append(_in_or_null(BookingRow.pol, flt.pols))
     if flt.pods:
         out.append(_in_or_null(BookingRow.pod, flt.pods))
+    if flt.ports_either:
+        out.append(or_(BookingRow.pol.in_(flt.ports_either), BookingRow.pod.in_(flt.ports_either)))
     if flt.statuses:
         out.append(BookingRow.status.in_(flt.statuses))
     if flt.date_from:
@@ -167,9 +170,7 @@ def latest_bookings(session: Session, n: int = 3, flt: BookingFilter | None = No
 
 
 def bookings_requiring_review(session: Session, flt: BookingFilter | None = None) -> list[BookingView]:
-    base = flt or BookingFilter()
-    only_review = BookingFilter(base.customers, base.pols, base.pods, ("VALIDATION_REQUIRED",),
-                                base.text, base.date_from, base.date_to)
+    only_review = replace(flt or BookingFilter(), statuses=("VALIDATION_REQUIRED",))
     return search_bookings(session, only_review)
 
 
