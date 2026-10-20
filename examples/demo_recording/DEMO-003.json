@@ -1,0 +1,28 @@
+{
+ "result": {
+  "intent": "UPDATE_BOOKING",
+  "bookings": [
+   {
+    "booking_ref": "BOOKINGREF-A400",
+    "customer": "Totally Unknown Trading",
+    "pol": null,
+    "pod": null,
+    "cargo_description": null,
+    "quantity": null,
+    "vin_list": [],
+    "weight_text": null,
+    "dimensions_text": null,
+    "requested_date_text": null,
+    "vessel": null,
+    "voyage": null,
+    "rate_text": null,
+    "contact_name": null,
+    "contact_email": null,
+    "notes": null
+   }
+  ],
+  "target_booking_ref": "BOOKINGREF-A400",
+  "message_notes": "The e-mail contains instruction-like text that was ignored.",
+  "unresolved_fields": []
+ }
+}

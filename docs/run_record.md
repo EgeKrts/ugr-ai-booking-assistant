@@ -48,7 +48,7 @@ Manuel inceleme ve senaryo testleri, modelin yanlış yaptığı şeyleri ortaya
 | EMAIL-018'de "next week" yakalanmıyordu | Bilgi kaybı | Göreli tarih kuralı |
 
 Bu döngü her istem değişikliğinde **tüm 34 e-postanın** yeniden çalıştırılması gerektiğini gösterdi; bunun için kayıt/oynatma
-ve canlı regresyon testleri eklendi. İstemde veri setinden alınmış metin yoktur, örnekler uydurmadır.
+ve canlı regresyon testleri eklendi. Düzeltme: istemdeki 3. ve 5. örnek ilk yazımda EMAIL-028 ve EMAIL-023'ün ifadelerini neredeyse birebir tekrarlıyordu (teste göre ayarlama riski). Örnekler farklı sözcüklerle yeniden yazıldı ve etkilenen e-postalar aynı doğru çıktıyı verdi.
 
 ## 4. Manuel inceleme: şüpheli sınıflandırmalar
 

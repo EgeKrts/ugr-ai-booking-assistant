@@ -27,8 +27,8 @@ her booking için `draft` (yalnızca güvenilir değerler), `raw` (modelin yazd�
    Aksi halde `draft` alanı boş kalır, sorun `issues`'a yazılır, ham değer `raw`'da durur.
 2. **Kaynakta doğrulama (grounding).** Modelin döndürdüğü liman, VIN, booking referansı,
    tarih ve sayılar e-posta metninde aranır. Bulunmazsa reddedilir. Ağırlık/ölçüde
-   cümle değil *sayı* aranır, çünkü model "Weight each: 2180 KG" ifadesini
-   "2180 KG each" diye yeniden sıralayabiliyor.
+   cümle değil *sayı* aranır, çünkü model "Weight each: 900 KG" gibi bir ifadeyi
+   "900 KG each" diye yeniden sıralayabiliyor.
 3. **Önem derecesi.** `ERROR` kaydı `READY` yapmaz; `WARNING` yapar ama gösterilir.
    `READY` ≠ `ASSIGNED`: sefer ataması hiçbir yerde üretilmez.
 4. **UPDATE / CANCEL / STATUS_INQUIRY booking yaratmaz.** Referans e-postada

@@ -1,0 +1,17 @@
+{
+ "recorded_at": "2026-10-20T13:40:35",
+ "model": "qwen3:8b",
+ "emails": 6,
+ "errors": 0,
+ "total_seconds": 33.4,
+ "seconds_per_email": {
+  "DEMO-001": 6.69,
+  "DEMO-002": 6.4,
+  "DEMO-003": 6.67,
+  "DEMO-004": 3.42,
+  "DEMO-005": 3.84,
+  "DEMO-006": 6.32
+ },
+ "prompt_sha256": "53922d86d80dc16c",
+ "schema_sha256": "908dfa83d3b6a047"
+}

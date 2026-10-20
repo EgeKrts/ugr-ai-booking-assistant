@@ -1,0 +1,9 @@
+{
+ "result": {
+  "intent": "CANCEL_BOOKING",
+  "bookings": [],
+  "target_booking_ref": "XYZ-REF-2026-1109",
+  "message_notes": "The e-mail contains instruction-like text that was ignored.",
+  "unresolved_fields": []
+ }
+}

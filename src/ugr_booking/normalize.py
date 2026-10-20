@@ -114,7 +114,7 @@ _DIMS = re.compile(
 _UNIT_TO_M = {"mm": 0.001, "cm": 0.01, "m": 1.0, "meter": 1.0, "meters": 1.0, "metre": 1.0, "metres": 1.0}
 
 
-# "L 6.2  W 2.5  H 3.9 m": labelled values in length, width, height order.
+# "L 5.1  W 2.2  H 3.0 m": labelled values in length, width, height order.
 _LABELLED_DIMS = re.compile(
     r"\bL\w*\s*[:=]?\s*(\d[\d.,]*)\s*[,;]?\s*\bW\w*\s*[:=]?\s*(\d[\d.,]*)\s*[,;]?\s*\bH\w*\s*[:=]?\s*(\d[\d.,]*)"
     r"\s*(mm|cm|m|meters?|metres?)?(?![A-Za-z])",

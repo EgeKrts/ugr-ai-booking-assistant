@@ -137,7 +137,7 @@ class ExtractedBooking(InputModel):
     requested_date_text: StrictStr | None = Field(default=None, description="Requested sailing date or period exactly as written; null if none.")
     vessel: StrictStr | None = Field(default=None, description="Vessel name if one is named.")
     voyage: StrictStr | None = Field(default=None, description="Voyage number if stated.")
-    rate_text: StrictStr | None = Field(default=None, description="Rate or price text exactly as written (for example Rate EUR 1 / lm free out).")
+    rate_text: StrictStr | None = Field(default=None, description="Rate or price text exactly as written (for example Rate EUR 5 per lane metre).")
     contact_name: StrictStr | None = Field(default=None, description="Name of the person who wrote or must be contacted, if given; not the company.")
     contact_email: StrictStr | None = Field(default=None, description="Contact e-mail address written in the body, if any.")
     notes: StrictStr | None = Field(default=None, max_length=200, description="One short sentence on anything unclear about this booking, or null.")

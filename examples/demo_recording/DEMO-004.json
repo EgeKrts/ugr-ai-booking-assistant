@@ -1,0 +1,9 @@
+{
+ "result": {
+  "intent": "STATUS_INQUIRY",
+  "bookings": [],
+  "target_booking_ref": "BOOKINGREF-A400",
+  "message_notes": "",
+  "unresolved_fields": []
+ }
+}

@@ -51,13 +51,13 @@ Result: intent CREATE_BOOKING; bookings[0]: customer "ACME Cars", pol "ROTTERDAM
 EXAMPLE 2 (invented): "Subject: RE: REF-77 resend. Resending because we are not sure the first mail arrived. Customer: Acme Cars, Booking Ref: REF-77, POL ROTTERDAM, POD DAKAR, Cargo: 2 x USED VAN, VIN: ZZTEST001, ZZTEST002."
 Result: intent CREATE_BOOKING with booking_ref REF-77 and all the details. A resent full booking request is a CREATE, not an update; repeats are detected later by the system.
 
-EXAMPLE 3 (invented): "Subject: Booking request REF-88. Customer: Acme Cars, POL ROTTERDAM, POD DAKAR, Cargo: 1 x USED VAN. Please note correction below: POD should be LAGOS, not DAKAR."
+EXAMPLE 3 (invented): "Subject: Booking request REF-88. Customer: Acme Cars, POL ROTTERDAM, POD DAKAR, Cargo: 1 x USED VAN. Amendment to the lines above: the discharge port is LAGOS instead of DAKAR."
 Result: intent CREATE_BOOKING, pod "LAGOS" (the corrected value). A correction written inside a message that carries the whole booking does not make it an update.
 
 EXAMPLE 4 (invented): "Subject: CHANGE REQUEST REF-12. Please change the POL of REF-12 to VALENCIA."
 Result: intent UPDATE_BOOKING, target_booking_ref REF-12, bookings[0].pol "VALENCIA", every other field null.
 
-EXAMPLE 5 (invented): "Subject: Update REF-9. Original booking was 8 units. Please reduce to 6 units. Remove these VINs: ZZTEST007, ZZTEST008."
+EXAMPLE 5 (invented): "Subject: Revision of REF-9. We first asked for 8 vehicles but now only need 6. Please drop ZZTEST007 and ZZTEST008 from the list."
 Result: intent UPDATE_BOOKING, target_booking_ref REF-9, bookings[0].quantity 6 (the NEW value, never the original one), every other field null.
 
 Only CREATE_BOOKING may produce entries in bookings as new bookings. A missing reference on UPDATE/CANCEL stays null; never invent one."""

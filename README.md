@@ -168,7 +168,11 @@ Izmir as the port of loading.* - *Which bookings require validation?* - *Summari
 status of BOOKINGREF-D100?* - *Show cancelled bookings.*
 
 Follow-up demo: `examples/demo_inbox` holds six **invented** e-mails (change a date, change a quantity, reject an unknown
-customer, ask a status, cancel, change an unknown reference) that run against the stored bookings.
+customer, ask a status, cancel, change an unknown reference) that run against the stored bookings. Their model output is
+recorded in `examples/demo_recording`, so the demo also runs offline (clearly labelled as a replay).
+
+Demo: [docs/demo_akisi.md](docs/demo_akisi.md) is the fixed walkthrough (Turkish) and `scripts/demo.ps1` prepares and resets it
+(`preflight`, `prepare`, `reset`, `dashboard`, `followup`, `followup-offline`, `status`).
 
 More detail: [extraction](docs/step_2.md), [validation](docs/step_3.md), [persistence and tools](docs/step_4.md),
 [dashboard](docs/step_5.md), [chatbot](docs/step_6.md), [test and batch run record](docs/run_record.md),

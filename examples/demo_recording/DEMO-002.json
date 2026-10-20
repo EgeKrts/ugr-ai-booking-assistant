@@ -1,0 +1,28 @@
+{
+ "result": {
+  "intent": "UPDATE_BOOKING",
+  "bookings": [
+   {
+    "booking_ref": "BOOKINGREF-D200",
+    "customer": null,
+    "pol": null,
+    "pod": null,
+    "cargo_description": null,
+    "quantity": 4,
+    "vin_list": [],
+    "weight_text": null,
+    "dimensions_text": null,
+    "requested_date_text": null,
+    "vessel": null,
+    "voyage": null,
+    "rate_text": null,
+    "contact_name": null,
+    "contact_email": null,
+    "notes": null
+   }
+  ],
+  "target_booking_ref": "BOOKINGREF-D200",
+  "message_notes": "",
+  "unresolved_fields": []
+ }
+}

@@ -1,0 +1,28 @@
+{
+ "result": {
+  "intent": "UPDATE_BOOKING",
+  "bookings": [
+   {
+    "booking_ref": "BOOKINGREF-NOPE",
+    "customer": null,
+    "pol": null,
+    "pod": "JEDDAH",
+    "cargo_description": null,
+    "quantity": null,
+    "vin_list": [],
+    "weight_text": null,
+    "dimensions_text": null,
+    "requested_date_text": null,
+    "vessel": null,
+    "voyage": null,
+    "rate_text": null,
+    "contact_name": null,
+    "contact_email": null,
+    "notes": null
+   }
+  ],
+  "target_booking_ref": "BOOKINGREF-NOPE",
+  "message_notes": "",
+  "unresolved_fields": []
+ }
+}

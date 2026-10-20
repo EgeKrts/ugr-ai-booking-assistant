@@ -35,7 +35,7 @@ def _in_source(value: str, source: str) -> bool:
 
 
 def _numbers_in_source(text: str, source: str) -> bool:
-    """The model may reorder words ("2180 KG each" for "Weight each: 2180 KG"),
+    """The model may reorder words ("900 KG each" for "Weight each: 900 KG"),
     but every number it reports must occur in the e-mail exactly as written."""
     numbers = number_tokens(text)
     return bool(numbers) and all(n in source for n in numbers)
@@ -140,7 +140,7 @@ def _validate_booking(raw: ExtractedBooking, index: int, email: EmailRecord, sou
             issues.add("VALUE_NOT_IN_SOURCE", "weight_kg_per_unit", "Weight number does not occur in the e-mail")
         else:
             weight = parse_weight(raw.weight_text)
-            # "each" may sit in the source label ("Weight each: 2180 KG") rather than in the model's phrase.
+            # "each" may sit in the source label ("Weight each: 900 KG") rather than in the model's phrase.
             per_unit = weight.per_unit or parse_weight(_line_with(raw.weight_text, lines) or "0").per_unit
             if weight.code:
                 issues.add(weight.code, "weight_kg_per_unit", weight.detail)

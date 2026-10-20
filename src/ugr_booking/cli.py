@@ -61,6 +61,7 @@ def build_parser() -> argparse.ArgumentParser:
     record = commands.add_parser("record-extractions", help="Run the model on every e-mail and save its output for later replay")
     _add_dataset(record)
     record.add_argument("--out", type=Path, default=Path("data/private/extractions"), help="Directory for the recording")
+    record.add_argument("--inbox", type=Path, metavar="DIR", help="Record the .txt e-mails in this folder instead of the dataset")
     report = commands.add_parser("report", help="Markdown report of every e-mail's outcome from the database")
     report.add_argument("--db", help="Database URL")
     listing = commands.add_parser("list-bookings", help="Show stored bookings, events and open issues")
@@ -141,7 +142,7 @@ def main(argv=None) -> int:
         if args.command == "ingest":
             return _run_ingest(args, path)
         if args.command == "record-extractions":
-            emails = list(read_dataset_emails(path).records)
+            emails = list((read_inbox_emails(args.inbox) if args.inbox else read_dataset_emails(path)).records)
             def show(email_id, payload, seconds):
                 print(f"{email_id}  {'ERROR ' + payload['error'] if 'error' in payload else payload['result']['intent']}  {seconds}s", flush=True)
             summary = record_extractions(emails, Extractor(), args.out, on_email=show)

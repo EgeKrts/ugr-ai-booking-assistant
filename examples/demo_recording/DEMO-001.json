@@ -1,0 +1,28 @@
+{
+ "result": {
+  "intent": "UPDATE_BOOKING",
+  "bookings": [
+   {
+    "booking_ref": "BOOKINGREF-A400",
+    "customer": null,
+    "pol": null,
+    "pod": null,
+    "cargo_description": null,
+    "quantity": null,
+    "vin_list": [],
+    "weight_text": null,
+    "dimensions_text": null,
+    "requested_date_text": "01/12/2026",
+    "vessel": null,
+    "voyage": null,
+    "rate_text": null,
+    "contact_name": null,
+    "contact_email": null,
+    "notes": null
+   }
+  ],
+  "target_booking_ref": "BOOKINGREF-A400",
+  "message_notes": "",
+  "unresolved_fields": []
+ }
+}
