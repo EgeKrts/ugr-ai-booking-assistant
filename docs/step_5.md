@@ -23,7 +23,7 @@ ya da `sqlite:///data/booking.sqlite3`). Dosya yoksa dashboard boş bir dosya **
   alt tarafta detay: alanlar, VIN listesi, doğrulama sorunları, işlem geçmişi (olaylar) ve kaynak e-posta metni.
 - **Needs attention:** İncelenecek booking'ler **nedenleriyle** (sorun kodları), uygulanamayan UPDATE/CANCEL
   talepleri ve niyete göre e-posta sayıları.
-- **Filtreler:** müşteri, POL, POD, durum (çoklu seçim), arama (referans, `BKG-00004`, e-posta no, kargo),
+- **Filtreler:** müşteri, POL, POD, **liman (yükleme veya boşaltma)**, durum (çoklu seçim), arama (referans, `BKG-00004`, e-posta no, kargo),
   istenen tarih aralığı, sıralama, sıfırla. Filtreler birbirini daraltır (AND) ve **hem listeyi hem
   tüm grafik ve sayıları** etkiler.
 

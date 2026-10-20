@@ -139,3 +139,48 @@ def test_every_manifest_entry_is_accounted_for(mail_package):
         from ugr_booking.dataset import load_manifest
         report = read_emails(source, load_manifest(source, expected_count=34))
     assert len(report.records) + len(report.failures) == report.manifest_total == 34
+
+
+# ---------------------------------------------------------------- inbox folder
+
+from pathlib import Path  # noqa: E402
+from ugr_booking.ingest import read_inbox_emails  # noqa: E402
+
+DEMO_INBOX = Path(__file__).resolve().parent.parent / "examples" / "demo_inbox"
+
+
+def write_mail(folder, name, email_id="INBOX-001", date="2026-10-12 09:00", body="Please cancel REF-1."):
+    text = f"Email-ID: {email_id}\nFrom: a@example.test\nDate: {date}\nSubject: Invented\n{SEP}{body}\n"
+    (folder / name).write_text(text, encoding="utf-8")
+
+
+def test_inbox_folder_is_read_without_a_manifest(tmp_path):
+    write_mail(tmp_path, "a.txt", "INBOX-001")
+    write_mail(tmp_path, "b.txt", "INBOX-002", date="2026-10-12 10:30:15")
+    report = read_inbox_emails(tmp_path)
+    assert [r.email_id for r in report.records] == ["INBOX-001", "INBOX-002"] and report.failures == ()
+    assert report.records[1].received_at == datetime(2026, 10, 12, 10, 30)
+
+
+def test_a_bad_inbox_file_is_reported_and_the_others_still_load(tmp_path):
+    write_mail(tmp_path, "good.txt")
+    (tmp_path / "no_separator.txt").write_text("Email-ID: X\nDate: 2026-10-12 09:00\nno separator", encoding="utf-8")
+    write_mail(tmp_path, "bad_date.txt", "INBOX-009", date="yesterday")
+    (tmp_path / "ignored.md").write_text("not an e-mail", encoding="utf-8")
+    report = read_inbox_emails(tmp_path)
+    assert [r.email_id for r in report.records] == ["INBOX-001"]
+    assert {f.file_name for f in report.failures} == {"no_separator.txt", "bad_date.txt"}
+    assert report.manifest_total == 3
+
+
+def test_duplicate_ids_in_the_inbox_are_refused(tmp_path):
+    write_mail(tmp_path, "a.txt", "INBOX-001")
+    write_mail(tmp_path, "b.txt", "INBOX-001")
+    with pytest.raises(ValueError, match="same Email-ID"):
+        read_inbox_emails(tmp_path)
+
+
+def test_the_shipped_demo_inbox_loads_cleanly():
+    report = read_inbox_emails(DEMO_INBOX)
+    assert [r.email_id for r in report.records] == [f"DEMO-00{i}" for i in range(1, 7)] and report.failures == ()
+    assert all(r.sender and r.clean_body and not r.warnings for r in report.records)

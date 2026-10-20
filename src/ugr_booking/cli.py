@@ -10,10 +10,10 @@ from .config import get_database_url, get_dataset_path
 from .dataset import DatasetError
 from .db import BookingRow, EmailRow, EventRow, IssueRow, make_engine
 from .extractor import ExtractionError, Extractor
-from .ingest import read_dataset_emails
+from .ingest import read_dataset_emails, read_inbox_emails
 from .master_data import MasterIndex, load_dataset
 from .query_tools import batch_report
-from .orchestrator import DirectPlanner, LLMPlanner, Orchestrator
+from .orchestrator import DirectPlanner, GuardedLLMPlanner, Orchestrator
 from .recorded import RecordedExtractor, record_extractions
 from .validators import validate_extraction
 
@@ -50,8 +50,11 @@ def build_parser() -> argparse.ArgumentParser:
     ingest = commands.add_parser("ingest", help="Process e-mails into the SQLite database (extract, validate, act)")
     _add_dataset(ingest)
     ingest.add_argument("--db", help="Database URL (default: DATABASE_URL or sqlite:///data/booking.sqlite3)")
-    ingest.add_argument("--planner", choices=("direct", "llm"), default="direct",
-                        help="direct = fixed rules choose the tool calls; llm = the model chooses them (still policy-checked)")
+    ingest.add_argument("--planner", choices=("direct", "llm"), default=None,
+                        help="llm (default): the model chooses the tool calls and fixed rules finish what it left undone; "
+                             "direct: fixed rules only (default when replaying recorded output). Every call is policy-checked.")
+    ingest.add_argument("--inbox", type=Path, metavar="DIR",
+                        help="Process the .txt e-mails in this folder instead of the dataset manifest (master data still comes from the dataset)")
     ingest.add_argument("--only", nargs="+", metavar="EMAIL_ID", help="Process only these e-mails")
     ingest.add_argument("--extractions", type=Path, metavar="DIR",
                         help="Replay recorded model output instead of calling the model (offline demo / regression)")
@@ -67,7 +70,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def _run_ingest(args, path: Path) -> int:
-    ingest_report = read_dataset_emails(path)
+    ingest_report = read_inbox_emails(args.inbox) if args.inbox else read_dataset_emails(path)
     emails = list(ingest_report.records)
     if args.only:
         wanted = set(args.only)
@@ -77,7 +80,9 @@ def _run_ingest(args, path: Path) -> int:
         emails = [e for e in emails if e.email_id in wanted]
     master = MasterIndex.from_dataset(load_dataset(path))
     engine = make_engine(get_database_url(args.db))
-    planner = LLMPlanner() if args.planner == "llm" else DirectPlanner()
+    choice = args.planner or ("direct" if args.extractions else "llm")
+    planner = GuardedLLMPlanner() if choice == "llm" else DirectPlanner()
+    print(f"Tool calls are chosen by: {'the language model (rules finish what it leaves undone)' if choice == 'llm' else 'fixed rules'}", flush=True)
     extractor = Extractor()
     if args.extractions:
         extractor = RecordedExtractor(args.extractions)
@@ -87,7 +92,7 @@ def _run_ingest(args, path: Path) -> int:
     report = orchestrator.ingest(emails, on_email=lambda o: print(o.line(), flush=True))
     report.unreadable = 0 if args.only else len(ingest_report.failures)
     print()
-    _dump(report.summary())
+    _dump({**report.summary(), **report.planner_stats()})
     return 0 if report.summary()["failed"] == 0 else 1
 
 

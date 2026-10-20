@@ -204,3 +204,74 @@ def test_tool_model_outage_marks_the_email_failed_and_keeps_nothing():
     orchestrator, engine, _ = make_orchestrator({"EXAMPLE-001": result(CREATE, bookings=[booking()])}, planner=Down([]))
     [outcome] = orchestrator.ingest([mail(1, BODY)]).outcomes
     assert outcome.status == "FAILED" and count(engine, BookingRow) == 0
+
+
+# ------------------------------------------------- guarded planner (default mode)
+
+from ugr_booking.orchestrator import GuardedLLMPlanner  # noqa: E402
+
+
+def guarded(*messages):
+    return GuardedLLMPlanner(llm=ScriptedPlanner(list(messages)))
+
+
+def test_when_the_model_chooses_correctly_the_rules_do_nothing():
+    planner = guarded({"tool_calls": [call("create_booking", booking_index=0)]}, {"content": "done"})
+    orchestrator, engine, _ = make_orchestrator({"EXAMPLE-001": result(CREATE, bookings=[booking()])}, planner=planner)
+    report = orchestrator.ingest([mail(1, BODY)])
+    stats = report.planner_stats()
+    assert count(engine, BookingRow) == 1
+    assert (stats["tool_calls_chosen_by_model"], stats["tool_calls_chosen_by_rules"]) == (1, 0)
+    assert report.outcomes[0].results[0].data["via"] == "model" and "[model]" in report.outcomes[0].line()
+
+
+def test_a_silent_model_cannot_make_a_booking_request_disappear():
+    orchestrator, engine, _ = make_orchestrator({"EXAMPLE-001": result(CREATE, bookings=[booking()])},
+                                                planner=guarded({"content": "I will do nothing"}))
+    report = orchestrator.ingest([mail(1, BODY)])
+    assert count(engine, BookingRow) == 1 and report.outcomes[0].status == "PROCESSED"
+    assert report.planner_stats()["tool_calls_chosen_by_rules"] == 1 and "[rules]" in report.outcomes[0].line()
+
+
+def test_rules_create_the_candidate_the_model_skipped():
+    script = {"EXAMPLE-001": result(CREATE, bookings=[booking(), booking(pod="YANBU", vin_list=["TESTVIN0003", "TESTVIN0004"])])}
+    orchestrator, engine, _ = make_orchestrator(script, planner=guarded(
+        {"tool_calls": [call("create_booking", booking_index=0)]}, {"content": "done"}))
+    orchestrator.ingest([mail(1, BODY + "POD YANBU\nVIN: TESTVIN0003\nVIN: TESTVIN0004\n")])
+    assert [b.pod for b in rows(engine, BookingRow)] == ["BBJED", "CCYAN"]
+
+
+def test_a_wrong_tool_is_refused_and_the_rules_apply_the_right_one():
+    script = {"EXAMPLE-001": result(CREATE, bookings=[booking(booking_ref="REF-G1")]), "EXAMPLE-002": result(CANCEL, target="REF-G1")}
+    planner = guarded({"tool_calls": [call("create_booking", booking_index=0)]}, {"content": "done"},
+                      {"tool_calls": [call("create_booking", booking_index=0)]}, {"content": "done"})   # wrong tool for a CANCEL
+    orchestrator, engine, _ = make_orchestrator(script, planner=planner)
+    report = orchestrator.ingest([mail(1, with_ref("REF-G1")), mail(2, "Cancel REF-G1")])
+    assert rows(engine, BookingRow)[0].status == "CANCELLED"
+    refused, cancelled = report.outcomes[1].results
+    assert (refused.code, cancelled.code, cancelled.data["via"]) == ("TOOL_NOT_ALLOWED_FOR_INTENT", "CANCELLED", "rules")
+    assert report.planner_stats()["model_calls_refused_by_policy"] == 1
+
+
+def test_a_status_question_the_model_did_not_look_up_is_looked_up_by_the_rules():
+    orchestrator, _, _ = make_orchestrator({"EXAMPLE-001": result(STATUS, target="REF-9")}, planner=guarded({"content": "nothing"}))
+    [outcome] = orchestrator.ingest([mail(1, "Where is REF-9?")]).outcomes
+    assert [(r.tool, r.data["via"]) for r in outcome.results] == [("lookup_booking", "rules")]
+
+
+def test_the_rules_never_act_on_non_booking_mail():
+    orchestrator, engine, _ = make_orchestrator({"EXAMPLE-001": result(NON_BOOKING)}, planner=guarded({"content": "nothing"}))
+    [outcome] = orchestrator.ingest([mail(1, "Rate only")]).outcomes
+    assert outcome.results == [] and count(engine, EventRow) == 0
+
+
+def test_a_model_outage_in_the_default_mode_keeps_nothing_and_retries_later():
+    class Down(ScriptedPlanner):
+        def _chat(self, messages):
+            from ugr_booking.extractor import ExtractionError
+            raise ExtractionError("LLM_UNAVAILABLE", "down")
+
+    orchestrator, engine, _ = make_orchestrator({"EXAMPLE-001": result(CREATE, bookings=[booking()])},
+                                                planner=GuardedLLMPlanner(llm=Down([])))
+    [outcome] = orchestrator.ingest([mail(1, BODY)]).outcomes
+    assert outcome.status == "FAILED" and count(engine, BookingRow) == 0

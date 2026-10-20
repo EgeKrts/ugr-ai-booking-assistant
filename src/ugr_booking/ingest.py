@@ -149,3 +149,41 @@ def read_emails(source: DatasetSource, manifest: tuple[ManifestEntry, ...]) -> I
 def read_dataset_emails(path: Path, expected_count: int | None = 34) -> IngestReport:
     with DatasetSource(path) as source:
         return read_emails(source, load_manifest(source, expected_count=expected_count))
+
+
+def read_inbox_emails(directory: Path) -> IngestReport:
+    """Read every *.txt e-mail in a folder (same layout as the dataset e-mails, no manifest needed).
+
+    The Email-ID, Date and Subject headers supply the identity the manifest would have given.
+    A file that cannot be read becomes a reported failure; the others still load.
+    """
+    records: list[EmailRecord] = []
+    failures: list[EmailFailure] = []
+    files = sorted(Path(directory).glob("*.txt"))
+    for file in files:
+        try:
+            text, warnings = decode_text(file.read_bytes())
+            separator = _SEPARATOR.search(text)
+            if separator is None:
+                raise EmailParseError("Could not find the dashed header/body separator")
+            headers = {m.group(1).casefold(): m.group(2).strip()
+                       for line in text[:separator.start()].splitlines() if (m := _HEADER.match(line.strip()))}
+            received = next((parsed for fmt in _DATE_FORMATS if (parsed := _try_date(headers.get("date", ""), fmt))), None)
+            if not headers.get("email-id") or received is None:
+                raise EmailParseError("E-mail needs Email-ID and Date headers")
+            entry = ManifestEntry(email_id=headers["email-id"], file=file.name,
+                                  received_at=received.strftime("%Y-%m-%d %H:%M"), subject=headers.get("subject", ""))
+            records.append(parse_email_text(text, entry, warnings))
+        except (EmailParseError, ValidationError, ValueError, OSError) as exc:
+            failures.append(EmailFailure(file.stem, file.name, f"{type(exc).__name__}: {exc}"))
+    ids = [r.email_id for r in records]
+    if len(ids) != len(set(ids)):
+        raise ValueError("Two inbox files use the same Email-ID")
+    return IngestReport(tuple(records), tuple(failures), len(files))
+
+
+def _try_date(value: str, date_format: str) -> datetime | None:
+    try:
+        return datetime.strptime(value, date_format)
+    except ValueError:
+        return None

@@ -58,7 +58,13 @@ class DirectPlanner:
         return []
 
     def run(self, email, validation, executor, ctx):
-        return [executor.execute(call.name, call.arguments, ctx) for call in self.plan(validation, email)]
+        return [_tagged(executor.execute(call.name, call.arguments, ctx), "rules") for call in self.plan(validation, email)]
+
+
+def _tagged(result: ToolResult, via: str) -> ToolResult:
+    """Record who chose the call: the language model ("model") or the fixed rules ("rules")."""
+    result.data["via"] = via
+    return result
 
 
 LLM_PLANNER_PROMPT = """You operate a booking system. An e-mail was already read and checked by code; you only choose which tools to call.
@@ -128,11 +134,39 @@ class LLMPlanner:
                         arguments = json.loads(arguments)
                     except json.JSONDecodeError:
                         arguments = None
-                result = executor.execute(function.get("name"), arguments, ctx)
+                result = _tagged(executor.execute(function.get("name"), arguments, ctx), "model")
                 results.append(result)
                 messages.append({"role": "tool", "tool_name": function.get("name", ""),
                                  "content": result.model_dump_json()})
         return results
+
+
+class GuardedLLMPlanner:
+    """Default planner: the model chooses the tool calls, fixed rules finish what it left undone.
+
+    Every call, whoever chose it, still goes through ToolExecutor's policy gate. The rules only run for work
+    the model did not do (no tool called, a refused call, a candidate it skipped), so a weak or silent model
+    can never make a booking request disappear. Each result says who chose it (`data["via"]`).
+    """
+
+    def __init__(self, llm: LLMPlanner | None = None, direct: DirectPlanner | None = None):
+        self.llm = llm or LLMPlanner()
+        self.direct = direct or DirectPlanner()
+
+    def run(self, email, validation, executor, ctx):
+        results = self.llm.run(email, validation, executor, ctx)      # a model outage propagates: the e-mail is retried later
+        intent = validation.intent
+        wanted = self.direct.plan(validation, email)
+        acted = [r for r in results if r.code not in REFUSED_CODES]
+        if intent == MessageIntent.CREATE_BOOKING:
+            todo = [c for c in wanted if c.arguments["booking_index"] not in ctx.created]
+        elif intent in (MessageIntent.UPDATE_BOOKING, MessageIntent.CANCEL_BOOKING):
+            todo = [] if any(r.tool in ("update_booking", "cancel_booking", "record_unresolved_action") for r in acted) else wanted
+        elif intent == MessageIntent.STATUS_INQUIRY:
+            todo = [] if any(r.tool == "lookup_booking" for r in acted) else wanted
+        else:
+            todo = []
+        return results + [_tagged(executor.execute(c.name, c.arguments, ctx), "rules") for c in todo]
 
 
 @dataclass
@@ -152,7 +186,7 @@ class EmailOutcome:
             return f"{self.email_id}  skipped (already {self.status})"
         if self.error:
             return f"{self.email_id}  FAILED  {self.error}"
-        actions = "; ".join(f"{r.tool}:{r.code}" for r in self.results) or "no action"
+        actions = "; ".join(f"{r.tool}:{r.code}[{r.data.get('via', '?')}]" for r in self.results) or "no action"
         return f"{self.email_id}  {self.intent}  {self.status}  {actions}"
 
 
@@ -160,6 +194,15 @@ class EmailOutcome:
 class BatchReport:
     outcomes: list[EmailOutcome] = field(default_factory=list)
     unreadable: int = 0          # files that could not be parsed into an e-mail at all
+
+    def planner_stats(self) -> dict:
+        """Who chose the tool calls: the model, or the rules (fixed planner, or finishing what the model left)."""
+        calls = [r for o in self.outcomes for r in o.results]
+        refused = [r for r in calls if r.code in REFUSED_CODES]
+        effective = [r for r in calls if r.code not in REFUSED_CODES]
+        return {"tool_calls_chosen_by_model": sum(r.data.get("via") == "model" for r in effective),
+                "tool_calls_chosen_by_rules": sum(r.data.get("via") == "rules" for r in effective),
+                "model_calls_refused_by_policy": len(refused)}
 
     def summary(self) -> dict:
         events = Counter(e for o in self.outcomes for e in o.events)

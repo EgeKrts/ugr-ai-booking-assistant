@@ -144,12 +144,65 @@ def test_chat_refuses_to_change_data(monkeypatch, chat_url):
     assert sql_scalar(chat_url, "SELECT COUNT(*) FROM bookings WHERE status='CANCELLED'") == 1
 
 
-def test_chat_filter_can_be_applied_to_the_bookings_tab(monkeypatch, chat_url):
+def test_chat_answer_filters_the_dashboard_automatically(monkeypatch, chat_url):
+    at = run(monkeypatch, chat_url)
+    assert metrics(at)["Total bookings"] == "3"
+    at.chat_input[0].set_value("Show cancelled bookings").run()
+    assert not at.exception
+    assert at.sidebar.multiselect(key="f_statuses").value == ["CANCELLED"]
+    assert metrics(at)["Total bookings"] == "1" and metrics(at)["Cancelled"] == "1"      # KPIs follow the question
+    assert "Last chat question:** Show cancelled bookings" in all_markdown(at)
+    assert any("1 booking(s) highlighted" in c.value for c in at.caption)
+
+
+def test_chat_answer_highlights_the_bookings_it_mentions(monkeypatch, chat_url):
+    at = run(monkeypatch, chat_url)
+    at.chat_input[0].set_value("Summarize the latest two bookings").run()
+    assert metrics(at)["Total bookings"] == "3"                    # no filter for "latest": everything stays visible
+    rows = [row for df in at.dataframe for row in df.value.to_dict("records")]
+    in_table = [row for row in rows if "Status" in row and row.get("Chat")]          # the Bookings table
+    assert len(in_table) == 2 and all(row["ID"] in all_markdown(at) for row in in_table)
+    assert any(row["ID"] == "BKG-00003" and row["Chat"] for row in rows if "Why" in row)   # also marked in Needs attention
+
+
+def test_chat_focus_can_be_cleared(monkeypatch, chat_url):
     at = run(monkeypatch, chat_url)
     at.chat_input[0].set_value("Show cancelled bookings").run()
-    next(b for b in at.button if "Bookings tab" in b.label).click().run()
-    assert at.sidebar.multiselect(key="f_statuses").value == ["CANCELLED"]
-    assert metrics(at)["Total bookings"] == "1"
+    next(b for b in at.button if b.label == "Clear chat focus").click().run()
+    assert metrics(at)["Total bookings"] == "3" and "Last chat question" not in all_markdown(at)
+    assert at.sidebar.multiselect(key="f_statuses").value == []
+
+
+def test_a_question_with_no_result_leaves_the_filters_alone(monkeypatch, chat_url):
+    at = run(monkeypatch, chat_url)
+    at.chat_input[0].set_value("Show bookings for a non-existing customer called Foo Corp").run()
+    assert metrics(at)["Total bookings"] == "3"
+    assert any("No bookings matched" in c.value for c in at.caption)
+
+
+def test_a_port_without_a_role_filters_loading_or_discharge(monkeypatch, tmp_path):
+    """Needs real port codes, so this database is written directly instead of through the invented-master pipeline."""
+    from datetime import date, datetime
+    from sqlalchemy.orm import Session
+    from ugr_booking.config import get_dataset_path
+    from ugr_booking.db import BookingRow, EmailRow
+    if not get_dataset_path().exists():
+        pytest.skip("the dataset (master data) is not available locally")
+    monkeypatch.setenv("UGR_CHAT_PLANNER", "keywords")
+    database = f"sqlite:///{tmp_path / 'ports.sqlite3'}"
+    engine = make_engine(database)
+    with Session(engine) as session, session.begin():
+        session.add(EmailRow(email_id="E-1", received_at=datetime(2026, 10, 1), subject="s", file_name="f", raw_body="", clean_body="",
+                             status="PROCESSED", processed_at=datetime(2026, 10, 1)))
+        session.flush()                                            # the e-mail row must exist before its bookings
+        for pol, pod in (("TRIZM", "SAYNB"), ("ITGOA", "TRIZM"), ("ITGOA", "SAJED")):
+            session.add(BookingRow(pol=pol, pod=pod, customer="ABC Shipping", quantity=1, requested_date=date(2026, 11, 1), vin_list=[],
+                                   status="READY", source_email_id="E-1", created_at=datetime(2026, 10, 1), updated_at=datetime(2026, 10, 1)))
+    engine.dispose()
+    at = run(monkeypatch, database)
+    at.chat_input[0].set_value("Show bookings for Izmir").run()
+    assert at.sidebar.multiselect(key="f_ports").value == ["TRIZM"]
+    assert metrics(at)["Total bookings"] == "2"
 
 
 def test_chat_example_questions_and_clear(monkeypatch, chat_url):

@@ -28,8 +28,8 @@ Sayılar tek bir çalıştırmaya aittir; e-posta metni içermez, yalnızca ID, 
 
 | Komut | Sonuç |
 |---|---|
-| `python -m pytest -q` | **298 geçti, 22 atlandı** (atlananlar canlı model testleri), sıfır başarısızlık, ~10 sn |
-| `python -m pytest --live -q` | **320 / 320 geçti** (canlı testler yaklaşık 2,5 dk) |
+| `python -m pytest -q` | **313 geçti, 22 atlandı** (atlananlar canlı model testleri), sıfır başarısızlık, ~11 sn |
+| `python -m pytest --live -q` | **335 / 335 geçti** (canlı testler dahil yaklaşık 2,8 dk) |
 
 Model gerektirmeyen testler sahte çıkarıcı ve geçici veritabanıyla çalışır. `tests/test_scenarios.py` 34 e-postayı gerçek
 model çıktısının **kayıttan oynatılmasıyla** tüm hattan geçirir (42 test). Kayıt ve veri paketi Git'te olmadığı için bu
@@ -113,3 +113,21 @@ ve canlı regresyon testleri eklendi. İstemde veri setinden alınmış metin yo
 8. SQLite tek kullanıcı içindir; eşzamanlı yazma desteklenmez.
 9. Senaryo testleri yerel veri paketi ve kayıt gerektirir (Git'te yok); başka makinede atlanır.
 10. Token kullanımı ölçülmedi.
+
+## 7. Sonradan eklenen: araç seçimini modelin yapması ve takip e-postası demosu
+
+PDF'in "kontrollü AI → tool etkileşimi" maddesi için `ingest` varsayılanı **modelin araç seçmesi** olarak değiştirildi
+(`GuardedLLMPlanner`; ayrıntı: [step_4](step_4.md)). Aynı 34 e-posta yeniden canlı çalıştırıldı:
+
+| Ölçü | Değer |
+|---|---|
+| Araç çağrısını seçen: model / kurallar | **49 / 0** |
+| Politika kapısının reddettiği model çağrıları | 15 |
+| Toplu rapor (her e-postanın durumu, booking ve olayları) | Sabit kurallı çalıştırmayla **birebir aynı** |
+| Sayılar | 34/34 işlendi, 0 hata, 23 oluşan (9 READY, 14 VALIDATION_REQUIRED), 1 iptal, 1 duplicate, 6 uygulanamayan |
+
+`update_booking` gerçek veride, `examples/demo_inbox/` içindeki uydurma takip e-postalarıyla gösterildi (gerçek model, gerçek
+booking'ler): tarih güncellemesi uygulandı, adet güncellemesi kaydı incelemeye döndürdü, bilinmeyen müşteri değişikliği
+uygulanmadı, iptal ve durum sorgusu çalıştı, olmayan referans booking oluşturmadı (tablo: [step_4](step_4.md)).
+
+Chat cevapları artık dashboard'u otomatik filtreler ve vurgular ([step_6](step_6.md)).

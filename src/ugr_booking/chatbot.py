@@ -7,7 +7,7 @@ appear in a reply that is not in the database.
 """
 from __future__ import annotations
 from collections import Counter
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import StrEnum
 import json
 import re
@@ -398,6 +398,7 @@ class ChatService:
                                  description, summary=self._summary(views))
         if q.intent == QueryIntent.BOOKINGS_REQUIRING_REVIEW:
             views = bookings_requiring_review(session, q.filter)
+            base.filter = replace(q.filter, statuses=("VALIDATION_REQUIRED",))     # what the dashboard should show for this question
             return self._listing(session, base, views[:q.limit or MAX_LIST_LIMIT], len(views), "Bookings that need validation",
                                  description, reasons=True)
         total = count_bookings(session, q.filter)

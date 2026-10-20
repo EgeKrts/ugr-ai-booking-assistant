@@ -1,0 +1,9 @@
+Email-ID: DEMO-005
+From: booking@xyzlojistik.example
+To: booking@ugr.example
+Date: 2026-10-12 10:20
+Subject: CANCEL XYZ-REF-2026-1109
+------------------------------------------------------------------------
+Please CANCEL XYZ-REF-2026-1109. The customer postponed the shipment.
+
+XYZ Lojistik

@@ -1,0 +1,9 @@
+Email-ID: DEMO-001
+From: ops@abcshipping.example
+To: booking@ugr.example
+Date: 2026-10-12 09:00
+Subject: CHANGE REQUEST - BOOKINGREF-A400
+------------------------------------------------------------------------
+Please change the requested sailing date of BOOKINGREF-A400 to 01/12/2026.
+
+Thanks.

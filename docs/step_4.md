@@ -64,20 +64,52 @@ Sonuç `success` / `failure` / `review_required` ve bir kod + gerekçedir.
 - **Idempotency:** `PROCESSED` / `REVIEW_REQUIRED` e-postalar atlanır (model bile çağrılmaz);
   `FAILED` olanlar bir sonraki çalıştırmada yeniden denenir.
 
-## LLM tool-calling
+## LLM tool-calling (varsayılan mod)
 
-`--planner llm` ile araçları model seçer: sistem istemi + doğrulanmış özet (e-posta metni **değil**)
-ve araç tanımları gönderilir; model `lookup_booking` sonucunu görüp `cancel_booking` ya da
-`record_unresolved_action` seçer (en çok 4 tur). Seçimleri yine `ToolExecutor` denetler.
-Reddedilen çağrılar veriye dokunmaz ve e-postanın durumunu bozmaz; sonuç metninde
-`[refused: ...]` olarak denetim için kalır.
+`ingest` varsayılan olarak **araçları modelin seçtiği** `GuardedLLMPlanner` ile çalışır (`--planner direct` sabit kurallar,
+kayıttan oynatırken varsayılan). Model sistem istemi + doğrulanmış özet (e-posta metni **değil**) ve araç tanımlarını alır;
+`lookup_booking` sonucunu görüp `cancel_booking` ya da `record_unresolved_action` seçer (en çok 4 tur).
 
-Gerçek `qwen3:8b` gözlemi (008, 012, 013, 017, 024, 030, 004): 013'te `lookup_booking → cancel_booking`
-zincirini model kurdu; 030'da kayıt bulunamayınca `record_unresolved_action`'ı seçti; 017'de iki
-`create_booking`. Model bazen gereksiz `record_unresolved_action` çağırdı (NON_BOOKING, duplicate sonrası);
-politika hepsini reddetti. Bu, politika katmanının neden gerekli olduğunu gösteren somut örnektir.
-`reason` alanını model yazar (≤ 200 karakter); yalnızca açıklama olarak saklanır, hiçbir karar
-ona bağlı değildir.
+Üç güvence katmanı:
+
+1. **Politika kapısı** (`ToolExecutor`): modelin her çağrısı allowlist, argüman şeması, niyet uyumu ve referans bağlama
+   denetiminden geçer. Reddedilen çağrılar veriye dokunmaz ve e-postanın durumunu bozmaz; sonuç metninde
+   `[refused: ...]` olarak denetim için kalır.
+2. **Kuralların tamamlaması**: model hiç araç çağırmazsa, bir adayı atlarsa ya da yanlış araç seçip reddedilirse, yapılmayan
+   iş sabit kurallarla tamamlanır. Böylece sessiz ya da zayıf bir model bir booking talebini **kaybettiremez**.
+3. **Kim seçti, kayıtlı**: her sonuç `data["via"] = model | rules` taşır; `ingest` çıktısındaki `[model]` / `[rules]` etiketleri
+   ve özetteki `tool_calls_chosen_by_model / _by_rules / model_calls_refused_by_policy` bunu gösterir.
+
+Model servisi kapalıysa e-posta `FAILED` olur, hiçbir şey saklanmaz ve sonraki çalıştırmada yeniden denenir.
+
+**Gerçek ölçüm (qwen3:8b, 34 e-posta):** model **49** araç çağrısı seçti, kurallar **0** çağrı tamamladı, politika modelin **15**
+gereksiz çağrısını reddetti (örneğin NON_BOOKING e-postasında `record_unresolved_action`). Toplu rapor, sabit kurallı
+çalıştırmayla **birebir aynı** çıktı. 031'de model salt-okunur `lookup_customer` aracını da kendisi çağırdı.
+
+`reason` alanını model yazar (≤ 200 karakter); yalnızca açıklama olarak saklanır, hiçbir karar ona bağlı değildir.
+
+## Takip e-postaları: `update_booking` gerçek veride
+
+Paketteki UPDATE/CANCEL e-postalarının ilk kaydı olmadığı için hiçbiri uygulanamaz. Güncelleme yolunu gerçek veride göstermek için
+`examples/demo_inbox/` içinde **uydurma** altı takip e-postası var (veri setinden metin içermez). Aynı biçimdeki bir klasör
+`ingest --inbox` ile işlenir (yerel dosya girişi; manifest gerekmez):
+
+```powershell
+Copy-Item data\booking.sqlite3 data\demo.sqlite3
+.\.venv\Scripts\python.exe -m ugr_booking.cli ingest --inbox examples/demo_inbox --db sqlite:///data/demo.sqlite3
+.\.venv\Scripts\python.exe -m ugr_booking.cli list-bookings --events --db sqlite:///data/demo.sqlite3
+```
+
+Gerçek model ve gerçek booking'ler üzerinde sonuç:
+
+| E-posta | İçerik | Sonuç |
+|---|---|---|
+| DEMO-001 | A400'ün sefer tarihini değiştir | `UPDATED`; olay: `requested_date 2026-11-10 → 2026-12-01` |
+| DEMO-002 | D200'ü 4 adet yap (3 VIN var) | `UPDATED_NEEDS_REVIEW`; adet 3 → 4, kayıt `VALIDATION_REQUIRED`, `VIN_COUNT_MISMATCH` |
+| DEMO-003 | A400'ün müşterisini bilinmeyen bir firmaya çevir | `UPDATE_NOT_APPLIED` (`UNKNOWN_CUSTOMER`); kayıt değişmedi. Model "çözülemedi" demeye çalıştı, backend booking var olduğu için reddetti (`ACTION_IS_RESOLVABLE`) |
+| DEMO-004 | A400'ün durumu? | `lookup_booking` → `FOUND`, booking oluşmadı |
+| DEMO-005 | XYZ-REF-2026-1109'u iptal et | `CANCELLED`; sebep olay kaydında |
+| DEMO-006 | Olmayan BOOKINGREF-NOPE'u değiştir | `BOOKING_NOT_FOUND`, `FAILED_ACTION`, booking oluşmadı |
 
 ## Gerçek veride sonuç (qwen3:8b, `ingest`, 34 e-posta)
 

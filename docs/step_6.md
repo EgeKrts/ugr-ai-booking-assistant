@@ -69,7 +69,19 @@ hiç geçmiyorsa "no booking with reference X in the database" der.
 ## Tutarlılık
 
 Sohbet cevabındaki ID kümesi, aynı filtreyle `search_bookings` sonucuna eşittir ve sayı `count_bookings` ile aynıdır
-(testlerde karşılaştırılıyor). Cevaptaki **"Show these in the Bookings tab"** düğmesi filtreyi kenar çubuğuna uygular.
+(testlerde karşılaştırılıyor).
+
+## Dashboard cevabı otomatik yansıtır
+
+Her cevap dashboard'u da günceller (gereksinim: "istenen bilgiyi dashboard'da filtreleme, vurgulama veya güncel özet ile yansıt"):
+
+- **Filtre:** cevabın filtresi kenar çubuğuna otomatik uygulanır (müşteri, POL, POD, durum, referans/ID araması; yönü
+  belirtilmemiş liman için yeni **Port (loading or discharge)** filtresi). KPI'lar, grafikler ve tablo birlikte güncellenir.
+- **Vurgu:** cevaptaki booking'ler Bookings ve Needs attention tablolarında mavi satır ve **★** ile işaretlenir
+  (filtre olmayan sorularda, örneğin "latest three", tüm tablo görünür kalır ve ilgili satırlar vurgulanır).
+- **Bant:** sekmelerin üstünde son soru, cevap ve "dashboard bu cevabı izliyor" notu durur (uzun cevaplar kapalı bir
+  bölümdedir). Streamlit, yeniden çalışınca sekmeyi ilk sekmeye döndürdüğü için cevap burada da görünür.
+- **Sonuç yoksa** filtreler değiştirilmez, bant bunu söyler. **Clear chat focus** filtreleri ve vurguyu temizler.
 
 ## Elle denerken ve testle bulunan hatalar
 

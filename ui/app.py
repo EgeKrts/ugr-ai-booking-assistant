@@ -16,7 +16,7 @@ from ugr_booking.db import make_engine
 from ugr_booking.chatbot import ChatService, KeywordPlanner
 from ugr_booking.master_data import MasterIndex, load_dataset
 from ugr_booking.query_tools import (
-    BookingFilter, ORDERS, bookings_requiring_review, count_bookings, count_by, email_overview, failed_actions,
+    UNKNOWN_LABEL, BookingFilter, ORDERS, bookings_requiring_review, count_bookings, count_by, email_overview, failed_actions,
     filter_options, get_booking_detail, open_issue_codes, search_bookings,
 )
 
@@ -76,14 +76,21 @@ def apply_to_bookings_tab(flt: BookingFilter, options: dict[str, list[str]]) -> 
     st.session_state["f_customers"] = keep(flt.customers, "customers")
     st.session_state["f_pols"] = keep(flt.pols, "pols")
     st.session_state["f_pods"] = keep(flt.pods, "pods")
+    st.session_state["f_ports"] = [p for p in flt.ports_either if p in options["pols"] or p in options["pods"]]
     st.session_state["f_statuses"] = keep(flt.statuses, "statuses")
     st.session_state["f_text"] = flt.text
 
 
-def chat_tab(url: str, options: dict[str, list[str]]) -> None:
+def clear_chat_focus() -> None:
+    reset_filters()
+    st.session_state.pop("chat_focus", None)
+
+
+def chat_tab(url: str) -> None:
     service = chat_service(url)
     st.caption("Answers come only from the booking database and are built from the matching rows. "
-               "This assistant is read-only: it cannot change, create or cancel anything.")
+               "This assistant is read-only: it cannot change, create or cancel anything. "
+               "Each answer also filters and highlights the dashboard.")
     if service is None:
         st.warning("The chat needs the master data (customer and port aliases). Put the dataset in "
                    "`data/private/dataset` or set `DATASET_PATH`.")
@@ -98,11 +105,19 @@ def chat_tab(url: str, options: dict[str, list[str]]) -> None:
     question = typed or st.session_state.pop("pending_question", None)
     if question:
         with st.spinner("Reading the question and querying the database..."):
-            history.append({"question": question, "answer": service.ask(question)})
+            answer = service.ask(question)
+        history.append({"question": question, "answer": answer})
+        # The dashboard follows the question: filters are applied before the sidebar is drawn on the next run.
+        st.session_state["chat_focus"] = {"question": question, "ids": list(answer.booking_ids), "has_data": answer.has_data,
+                                          "text": answer.text, "notes": list(answer.notes)}
+        if answer.has_data and answer.filter is not None:
+            st.session_state["pending_filter"] = answer.filter
+        st.rerun()
     if history and st.button("Clear conversation", key="clear_chat"):
         st.session_state["chat"] = []
+        clear_chat_focus()
         st.rerun()
-    for index, turn in enumerate(reversed(history)):
+    for turn in reversed(history):
         answer = turn["answer"]
         with st.chat_message("user"):
             st.write(turn["question"])
@@ -114,10 +129,6 @@ def chat_tab(url: str, options: dict[str, list[str]]) -> None:
                 st.caption(f"Interpreted by: {answer.interpreter}")
                 if answer.plan is not None:
                     st.json(answer.plan.model_dump(mode="json", exclude_none=True))
-            expressible = answer.filter is not None and not answer.filter.ports_either and not answer.filter.is_empty                 and answer.has_data
-            if expressible:
-                st.button("Show these in the Bookings tab", key=f"apply_{index}", on_click=apply_to_bookings_tab,
-                          args=(answer.filter, options), help="Sets the sidebar filters to this question's filters.")
 
 
 def database_ready(url: str) -> str | None:
@@ -133,7 +144,7 @@ def database_ready(url: str) -> str | None:
 # ------------------------------------------------------------------ sidebar
 
 def reset_filters() -> None:
-    for key in ("f_customers", "f_pols", "f_pods", "f_statuses"):
+    for key in ("f_customers", "f_pols", "f_pods", "f_ports", "f_statuses"):
         st.session_state[key] = []
     st.session_state["f_text"] = ""
     st.session_state["f_use_dates"] = False
@@ -144,6 +155,8 @@ def sidebar(options: dict[str, list[str]]) -> tuple[BookingFilter, str]:
     customers = st.sidebar.multiselect("Customer", options["customers"], key="f_customers")
     pols = st.sidebar.multiselect("Port of loading", options["pols"], key="f_pols", format_func=port_label)
     pods = st.sidebar.multiselect("Port of discharge", options["pods"], key="f_pods", format_func=port_label)
+    either_ports = sorted((set(options["pols"]) | set(options["pods"])) - {UNKNOWN_LABEL})
+    ports = st.sidebar.multiselect("Port (loading or discharge)", either_ports, key="f_ports", format_func=port_label)
     statuses = st.sidebar.multiselect("Status", options["statuses"], key="f_statuses")
     text = st.sidebar.text_input("Search", key="f_text", placeholder="BOOKINGREF-D100, BKG-00004, cargo, e-mail id")
     date_from = date_to = None
@@ -153,7 +166,8 @@ def sidebar(options: dict[str, list[str]]) -> tuple[BookingFilter, str]:
             date_from, date_to = picked
     order = st.sidebar.selectbox("Sort by", ORDERS, format_func=ORDER_LABELS.get, key="f_order")
     st.sidebar.button("Reset filters", on_click=reset_filters)
-    flt = BookingFilter(tuple(customers), tuple(pols), tuple(pods), tuple(statuses), text, date_from, date_to)
+    flt = BookingFilter(tuple(customers), tuple(pols), tuple(pods), tuple(statuses), text, date_from, date_to,
+                        ports_either=tuple(ports))
     return flt, order
 
 
@@ -174,18 +188,27 @@ def bar_chart(pairs: list[tuple[str, int]], title: str, *, status: bool = False,
     st.altair_chart(chart, use_container_width=True)
 
 
-def booking_frame(views, issue_codes: dict[int, list[str]]) -> pd.DataFrame:
-    return pd.DataFrame([{
+def whole_numbers(frame: pd.DataFrame, column: str = "Qty") -> pd.DataFrame:
+    """A missing quantity would turn the column into floats (2.000000); keep whole numbers and show gaps as blanks."""
+    frame[column] = frame[column].astype("Int64")
+    return frame
+
+
+def booking_frame(views, issue_codes: dict[int, list[str]], highlight: frozenset[str] = frozenset()) -> pd.DataFrame:
+    return whole_numbers(pd.DataFrame([{
+        "Chat": "\u2605" if v.display_id in highlight else "",
         "": "REVIEW" if v.needs_review else ("CANCELLED" if v.status == "CANCELLED" else "ok"),
         "ID": v.display_id, "Reference": v.external_ref or "-", "Customer": v.customer or "?",
         "POL": v.pol or "?", "POD": v.pod or "?", "Qty": v.quantity, "Requested date": v.requested_date.isoformat() if v.requested_date else "?",
         "Status": v.status, "Source e-mail": v.source_email_id, "Received": v.received_at,
         "Open issues": ", ".join(issue_codes.get(v.id, [])),
-    } for v in views])
+    } for v in views]))
 
 
 def style_rows(frame: pd.DataFrame):
     def row_style(row):
+        if row["Chat"]:
+            return ["background-color: rgba(59, 111, 182, 0.32); font-weight: 600"] * len(row)
         if row["Status"] == "VALIDATION_REQUIRED":
             return ["background-color: rgba(199, 119, 0, 0.18)"] * len(row)
         if row["Status"] == "CANCELLED":
@@ -257,12 +280,31 @@ def main() -> None:
             st.caption(f"{mails['emails_total']} e-mails stored.")
             st.stop()
 
-        flt, order = sidebar(filter_options(session))
+        options = filter_options(session)
+        pending = st.session_state.pop("pending_filter", None)      # set by the chat; must happen before the widgets exist
+        if pending is not None:
+            apply_to_bookings_tab(pending, options)
+        flt, order = sidebar(options)
+        focus = st.session_state.get("chat_focus")
+        highlight = frozenset(focus["ids"]) if focus else frozenset()
         views = search_bookings(session, flt, order=order)
         shown = len(views)
         by_status = dict(count_by(session, "status", flt))
         st.caption(f"Database: `{url}` - showing {shown} of {total_all} bookings"
                    + ("" if flt.is_empty else " (filters active)"))
+
+        if focus:
+            with st.container(border=True):
+                top, clear = st.columns([5, 1])
+                top.markdown(f"**Last chat question:** {focus['question']}")
+                clear.button("Clear chat focus", on_click=clear_chat_focus, key="clear_focus")
+                # short answers are shown; a long table starts collapsed so the dashboard stays in view
+                with st.expander("Answer", expanded=len(focus["text"]) < 900):
+                    st.markdown(focus["text"])
+                for note in focus["notes"]:
+                    st.caption(note)
+                st.caption(f"The dashboard below follows this answer: filters applied, {len(focus['ids'])} booking(s) highlighted."
+                           if focus["has_data"] else "No bookings matched, so the dashboard filters were left unchanged.")
 
         overview, table, attention, chat = st.tabs(["Overview", "Bookings", "Needs attention", "Chat"])
 
@@ -294,8 +336,8 @@ def main() -> None:
                 st.warning("No bookings match these filters.")
                 st.button("Reset filters", on_click=reset_filters, key="reset_empty")
             else:
-                frame = booking_frame(views, open_issue_codes(session))
-                st.caption("Amber rows need validation; grey italic rows are cancelled. Select a row for details.")
+                frame = booking_frame(views, open_issue_codes(session), highlight)
+                st.caption("Amber rows need validation; grey italic rows are cancelled; blue rows marked \u2605 are the bookings from your last chat answer. Select a row for details.")
                 picked = st.dataframe(style_rows(frame), hide_index=True, use_container_width=True,
                                       on_select="rerun", selection_mode="single-row", key="booking_table")
                 rows = picked.selection.rows if picked is not None else []
@@ -307,10 +349,10 @@ def main() -> None:
             st.subheader(f"Bookings that need validation ({len(review)})")
             if review:
                 codes = open_issue_codes(session)
-                st.dataframe(pd.DataFrame([{
-                    "ID": v.display_id, "Customer": v.customer or "?", "POL": v.pol or "?", "POD": v.pod or "?",
+                st.dataframe(whole_numbers(pd.DataFrame([{
+                    "Chat": "\u2605" if v.display_id in highlight else "", "ID": v.display_id, "Customer": v.customer or "?", "POL": v.pol or "?", "POD": v.pod or "?",
                     "Qty": v.quantity, "Why": ", ".join(codes.get(v.id, [])), "Source e-mail": v.source_email_id,
-                } for v in review]), hide_index=True, use_container_width=True)
+                } for v in review])), hide_index=True, use_container_width=True)
             else:
                 st.caption("Nothing waiting for validation under the current filters.")
             st.subheader("Requests that could not be applied")
@@ -327,7 +369,7 @@ def main() -> None:
 
 
         with chat:
-            chat_tab(url, filter_options(session))
+            chat_tab(url)
 
 
 main()

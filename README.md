@@ -62,8 +62,9 @@ $py = ".\.venv\Scripts\python.exe"
 & $py -m ugr_booking.cli parse-emails             # read and clean all e-mails (no model)
 & $py -m ugr_booking.cli extract  EMAIL-017       # model output for one e-mail, nothing saved
 & $py -m ugr_booking.cli validate EMAIL-019       # model + business rules, nothing saved
-& $py -m ugr_booking.cli ingest                   # all e-mails into data/booking.sqlite3
-& $py -m ugr_booking.cli ingest --planner llm --only EMAIL-008 EMAIL-012 EMAIL-013
+& $py -m ugr_booking.cli ingest                   # all e-mails into data/booking.sqlite3 (the model chooses the tool calls)
+& $py -m ugr_booking.cli ingest --planner direct --only EMAIL-008 EMAIL-012 EMAIL-013   # fixed rules instead of the model
+& $py -m ugr_booking.cli ingest --inbox examples/demo_inbox --db sqlite:///data/demo.sqlite3   # follow-up e-mails (updates, cancel, status)
 & $py -m ugr_booking.cli list-bookings --events   # what is stored
 & $py -m ugr_booking.cli report                   # Markdown: every e-mail's outcome, bookings and events
 & $py -m ugr_booking.cli record-extractions       # save the model's output for all e-mails (data/private/extractions)
@@ -115,6 +116,7 @@ See [step 1.2 and its limits](docs/step_1_2.md).
 ```text
 src/ugr_booking/   Python application package (ingest, extractor, validators, tools, orchestrator)
 ui/               Streamlit dashboard (ui/app.py)
+examples/         Invented follow-up e-mails for the update/cancel demo
 tests/            Unit and end-to-end tests with invented fixtures (no model needed)
 docs/             Decision notes (architecture diagram lives in this README)
 data/private/     Local inputs, excluded from Git

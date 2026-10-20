@@ -1,0 +1,9 @@
+Email-ID: DEMO-002
+From: export@defauto.example
+To: booking@ugr.example
+Date: 2026-10-12 09:20
+Subject: Quantity change - BOOKINGREF-D200
+------------------------------------------------------------------------
+Please change BOOKINGREF-D200 to 4 units.
+
+Regards.

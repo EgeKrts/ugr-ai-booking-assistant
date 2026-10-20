@@ -1,0 +1,9 @@
+Email-ID: DEMO-006
+From: ops@abcshipping.example
+To: booking@ugr.example
+Date: 2026-10-12 10:40
+Subject: Change POD - BOOKINGREF-NOPE
+------------------------------------------------------------------------
+Please change the POD of BOOKINGREF-NOPE to JEDDAH.
+
+Thanks.
