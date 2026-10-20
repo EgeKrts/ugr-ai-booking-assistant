@@ -43,6 +43,31 @@ class ManifestEntry(InputModel):
             raise ValueError("Value must not be blank")
         return value
 
+class EmailRecord(InputModel):
+    """Parsed e-mail envelope plus original and cleaned body text.
+
+    `clean_body` holds only the current message; explicitly quoted history is
+    kept apart in `quoted_body` so it cannot be mistaken for the latest
+    instruction. `warnings` are stable codes such as MISSING_SENDER.
+    """
+    email_id: StrictStr = Field(min_length=1)
+    received_at: datetime
+    subject: StrictStr
+    sender: StrictStr | None = None
+    raw_body: StrictStr
+    clean_body: StrictStr
+    quoted_body: StrictStr = ""
+    was_html: bool = False
+    file_name: StrictStr = Field(min_length=1)
+    warnings: tuple[StrictStr, ...] = ()
+
+    @field_validator("email_id", "file_name")
+    @classmethod
+    def reject_blank_identity(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("Value must not be blank")
+        return value
+
 class Customer(InputModel):
     customer_id: StrictStr = Field(min_length=1)
     name: StrictStr = Field(min_length=1)

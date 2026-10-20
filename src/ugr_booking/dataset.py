@@ -86,6 +86,20 @@ class DatasetSource:
         except (UnicodeError, json.JSONDecodeError) as exc:
             raise DatasetError(f"Invalid UTF-8 JSON in {name}") from exc
 
+
+    def read_bytes(self, name: str) -> bytes:
+        """Read a bounded file without decoding; callers decide how to handle bad text."""
+        item = self.check_file(name)
+        if self.archive:
+            with self.archive.open(item) as stream:
+                raw = stream.read(MAX_FILE_BYTES + 1)
+        else:
+            with item.open("rb") as stream:
+                raw = stream.read(MAX_FILE_BYTES + 1)
+        if len(raw) > MAX_FILE_BYTES:
+            raise DatasetError(f"File exceeds 2 MiB: {name}")
+        return raw
+
 def load_manifest(source: DatasetSource, expected_count: int | None = None) -> tuple[ManifestEntry, ...]:
     raw = source.read_json("manifest.json")
     if not isinstance(raw, list) or len(raw) > MAX_ENTRIES:

@@ -20,7 +20,7 @@ From the repository directory:
 
 ```powershell
 python -m venv .venv
-.\.venv\Scripts\python.exe -m pip install -r requirements-lock.txt
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
 .\.venv\Scripts\python.exe -m pip install --no-build-isolation -e .
 .\.venv\Scripts\python.exe -m pip check
 ```
@@ -29,10 +29,8 @@ If `python` is not on PATH, use the full path of an available Python 3.11/3.12
 executable for the first command. Explicitly invoking the virtual environment's
 Python avoids PowerShell activation-policy changes.
 
-`requirements.txt` pins the five direct dependencies. `requirements-lock.txt`
-records the complete installed development environment, excluding this editable
-package; it is generated and verified on Windows with Python 3.12. Other operating
-systems/Python versions may need a fresh resolution from `requirements.txt`.
+`requirements.txt` pins the five direct dependencies and is the single dependency
+source (also read by `pyproject.toml`). Tested on Windows with Python 3.12.
 
 Verify the package installation:
 
@@ -83,7 +81,7 @@ See [step 1.2 and its limits](docs/step_1_2.md).
 src/ugr_booking/   Python application package; modules added step by step
 ui/               Future Streamlit entry point
 tests/            Metadata, path safety and schema tests
-docs/             Decision notes and later architecture/demo documents
+docs/             Decision notes (architecture diagram lives in this README)
 data/private/     Local inputs, excluded from Git
 ```
 
