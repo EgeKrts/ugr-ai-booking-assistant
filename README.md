@@ -1,31 +1,32 @@
 # UGR AI Booking Intake & Operations Assistant
 
-A small, working prototype that turns booking e-mails into validated booking records, shows them in an
-interactive dashboard and lets users ask questions about them in natural language.
+Booking e-postalarını doğrulanmış booking kayıtlarına çeviren, bunları etkileşimli bir dashboard'da gösteren ve kayıtlar
+hakkında doğal dilde soru sorulmasını sağlayan küçük ama çalışan bir prototip.
 
 ```text
-E-mail  ->  preprocess  ->  LLM extraction  ->  validation  ->  controlled tools  ->  SQLite  ->  dashboard + chatbot
+E-posta  ->  ön işleme  ->  LLM ile çıkarım  ->  doğrulama  ->  kontrollü araçlar  ->  SQLite  ->  dashboard + chatbot
 ```
 
-The model **reads** (it proposes), the code **checks and decides**, and only a small set of policy-checked tools **writes**.
-Anything the system is not sure about is flagged for review instead of guessed.
+Model **okur** (öneri üretir), kod **denetler ve karar verir**, yazmayı ise yalnızca politika denetiminden geçen az sayıda
+araç yapar. Sistemin emin olmadığı her şey tahmin edilmez, incelemeye işaretlenir.
 
 | | |
 |---|---|
-| Language / stack | Python 3.12, Pydantic, SQLAlchemy + SQLite, Streamlit |
-| LLM | Local `qwen3:8b` through [Ollama](https://ollama.com) (no API key, no cloud) |
-| Input | The 34 supplied e-mails (kept out of Git) and any folder of `.txt` e-mails |
-| Status | Core flow complete and tested; see [what works](#results-on-the-supplied-e-mails) and [known limitations](#known-limitations) |
+| Dil / teknoloji | Python 3.12, Pydantic, SQLAlchemy + SQLite, Streamlit |
+| LLM | [Ollama](https://ollama.com) üzerinden yerel `qwen3:8b` (API anahtarı yok, bulut yok) |
+| Girdi | Verilen 34 e-posta (Git dışında tutulur) ve `.txt` e-postalardan oluşan herhangi bir klasör |
+| Durum | Çekirdek akış tamam ve test edildi; bkz. [sonuçlar](#sağlanan-e-postalardaki-sonuçlar) ve [bilinen sınırlamalar](#bilinen-sınırlamalar) |
 
-## Quick start (Windows PowerShell)
+## Hızlı başlangıç (Windows PowerShell)
 
-1. Install **Python 3.11 or 3.12** (the package refuses other versions) and [Ollama](https://ollama.com), then pull the model (about 5 GB, runs on an 8 GB GPU):
+1. **Python 3.11 veya 3.12** kur (paket başka sürümleri reddeder) ve [Ollama](https://ollama.com)'yı kur, sonra modeli indir
+   (yaklaşık 5 GB, 8 GB'lık bir ekran kartında çalışır):
 
    ```powershell
    ollama pull qwen3:8b
    ```
 
-2. Create the environment from the repository folder:
+2. Depo klasöründe ortamı oluştur:
 
    ```powershell
    python -m venv .venv
@@ -33,232 +34,247 @@ Anything the system is not sure about is flagged for review instead of guessed.
    .\.venv\Scripts\python.exe -m pip install -e .
    ```
 
-3. Put the dataset here (it is **not** in the repository, see [private data](#configuration-and-private-data)):
+3. Veri setini şuraya koy (depoda **yoktur**, bkz. [özel veri](#yapılandırma-ve-özel-veri)):
 
    ```text
-   data/private/dataset/      (manifest.json, emails/, master_data/; a ZIP also works)
+   data/private/dataset/      (manifest.json, emails/, master_data/; ZIP de olur)
    ```
 
-4. Process the e-mails (5 to 10 minutes with the model on an 8 GB GPU), then open the dashboard:
+4. E-postaları işle (8 GB'lık ekran kartında modelle 5 ila 10 dakika), sonra dashboard'u aç:
 
    ```powershell
    .\.venv\Scripts\python.exe -m ugr_booking.cli ingest
    .\.venv\Scripts\python.exe -m streamlit run ui/app.py
    ```
 
-   The dashboard opens at `http://localhost:8501`. Re-running `ingest` adds nothing: finished e-mails are skipped.
+   Dashboard `http://localhost:8501` adresinde açılır. `ingest` komutunu tekrar çalıştırmak hiçbir şey eklemez: biten e-postalar atlanır.
 
-5. Run the tests (no model needed, about 10 seconds):
+5. Testleri çalıştır (model gerekmez, yaklaşık 10 saniye):
 
    ```powershell
    .\.venv\Scripts\python.exe -m pytest -q
    ```
 
-macOS/Linux: the same commands with `python3` and `.venv/bin/python` should work; only Windows was tested.
+macOS/Linux: `python3` ve `.venv/bin/python` ile aynı komutların çalışması beklenir; yalnızca Windows'ta denendi.
 
-**No model available?** Replay a recorded model output instead (clearly labelled as not live AI), and chat with the
-keyword interpreter:
+**Model yok mu?** Bunun yerine kaydedilmiş bir model çıktısını tekrar oynat (canlı yapay zekâ olmadığı açıkça yazılır) ve
+chat'i anahtar kelime yorumlayıcısıyla kullan:
 
 ```powershell
 .\.venv\Scripts\python.exe -m ugr_booking.cli ingest --extractions data/private/extractions
 $env:UGR_CHAT_PLANNER = "keywords"
 ```
 
-(The recording is made once with `record-extractions` and is local, like the dataset.)
+(Kayıt, `record-extractions` ile bir kez alınır ve veri seti gibi yereldir.)
 
-## Architecture
+## Mimari
 
 ```mermaid
-flowchart LR
-    A["E-mail files<br/>(dataset or any folder)"] --> B["ingest.py, preprocess.py<br/>parse, clean HTML, split quoted history,<br/>withhold instruction-like text"]
-    B --> C["extractor.py<br/>qwen3:8b via Ollama<br/>JSON-schema constrained output"]
-    C --> D["validators.py, normalize.py, master_data.py<br/>deterministic rules; every value must<br/>occur in the e-mail"]
-    D --> E{"orchestrator.py<br/>planner"}
-    E -->|"model chooses the tool calls,<br/>rules finish what it left undone"| F["booking_tools.py<br/>policy gate: allowlist, argument schema,<br/>intent fit, e-mail reference"]
-    F --> G[("SQLite<br/>emails, bookings,<br/>booking_events, validation_issues")]
-    G --> H["query_tools.py<br/>read-only parameterised queries"]
-    H --> I["ui/app.py<br/>dashboard"]
-    H --> J["chatbot.py<br/>question to plan to fixed queries"]
-    J -->|"filters and highlights"| I
+flowchart TD
+    classDef girdi fill:#e6f0ff,stroke:#2b6cb0,color:#1a202c
+    classDef temizlik fill:#dff6f3,stroke:#0f8b7d,color:#1a202c
+    classDef yz fill:#f0e8ff,stroke:#6b46c1,color:#1a202c
+    classDef dogrulama fill:#fff0de,stroke:#dd6b20,color:#1a202c
+    classDef eylem fill:#ffe5ea,stroke:#c53060,color:#1a202c
+    classDef kalicilik fill:#e3f6e8,stroke:#2f855a,color:#1a202c
+    classDef sunum fill:#fff8d6,stroke:#b7791f,color:#1a202c
+
+    A["E-posta dosyaları<br/>veri seti veya herhangi bir klasör"]:::girdi
+    B["ingest.py, preprocess.py<br/>ayrıştır, HTML'i temizle,<br/>alıntıyı ve talimat benzeri metni ayır"]:::temizlik
+    C["extractor.py<br/>qwen3:8b (Ollama)<br/>JSON şemalı çıktı"]:::yz
+    D["validators.py, normalize.py, master_data.py<br/>deterministik kurallar,<br/>her değer e-postada geçmeli"]:::dogrulama
+    E{"orchestrator.py<br/>planlayıcı"}:::eylem
+    F["booking_tools.py<br/>politika kapısı: allowlist, argüman şeması,<br/>niyet uyumu, e-posta referansı"]:::eylem
+    G[("SQLite<br/>emails, bookings,<br/>booking_events, validation_issues")]:::kalicilik
+    H["query_tools.py<br/>salt okunur, parametreli sorgular"]:::sunum
+    I["ui/app.py<br/>dashboard"]:::sunum
+    J["chatbot.py<br/>soru, sorgu planı, sabit sorgu"]:::sunum
+
+    A --> B --> C --> D --> E
+    E -->|"araç çağrılarını model seçer,<br/>yapmadığını kurallar tamamlar"| F
+    F --> G --> H
+    H --> I
+    H --> J
+    J -->|"filtreler ve vurgular"| I
 ```
 
-### Where the AI is, and where it is not
+### Yapay zekâ nerede, nerede değil
 
-| Step | Language model | Deterministic code |
+| Adım | Dil modeli | Deterministik kod |
 |---|---|---|
-| Read the e-mail | Intent and fields, copied as written (`extractor.py`) | Cleaning, quote and injection handling (`preprocess.py`) |
-| Check the result | nothing | Master-data match, units, dates, VIN and quantity rules, "value must occur in the e-mail" (`validators.py`) |
-| Act | Chooses which tool to call (`GuardedLLMPlanner`) | Allowlist, argument and intent checks, rules that complete missed work, **all writes** (`booking_tools.py`) |
-| Answer questions | Turns the question into a small query plan (`chatbot.py`) | Validates the plan against the question and master data, runs fixed read-only queries, **writes the answer text** |
+| E-postayı oku | Niyet ve alanlar, yazıldığı gibi kopyalanır (`extractor.py`) | Temizleme, alıntı ve enjeksiyon yönetimi (`preprocess.py`) |
+| Sonucu denetle | hiçbir şey | Ana veri eşleştirme, birimler, tarihler, VIN ve adet kuralları, "değer e-postada geçmeli" (`validators.py`) |
+| Harekete geç | Hangi aracın çağrılacağını seçer (`GuardedLLMPlanner`) | Allowlist, argüman ve niyet denetimleri, atlananı tamamlayan kurallar, **tüm yazmalar** (`booking_tools.py`) |
+| Soruları cevapla | Soruyu küçük bir sorgu planına çevirir (`chatbot.py`) | Planı soruya ve ana veriye karşı doğrular, sabit salt okunur sorguları çalıştırır, **cevap metnini yazar** |
 
-The model never writes SQL, never writes answers, never writes to the database and never decides that a booking is valid.
+Model asla SQL yazmaz, asla cevap yazmaz, veritabanına yazmaz ve bir booking'in geçerli olduğuna karar vermez.
 
-### Modules
+### Modüller
 
-| File | Responsibility |
+| Dosya | Sorumluluk |
 |---|---|
-| `dataset.py`, `master_data.py` | Read the dataset safely; customer and port master data with alias matching |
-| `ingest.py`, `preprocess.py` | E-mail parsing; one bad file never stops a batch |
-| `extractor.py`, `recorded.py` | Model call, prompt, schema, retry; record and replay of model output |
-| `normalize.py`, `validators.py` | Number, weight, dimension and date parsing; business rules and issue codes |
-| `db.py`, `repository.py` | The four tables and all reads and writes |
-| `booking_tools.py`, `orchestrator.py` | Tools and policy gate; one transaction per e-mail; planners |
-| `query_tools.py`, `chatbot.py`, `ui/app.py` | Shared read-only queries; natural-language answers; Streamlit dashboard |
-| `cli.py` | Commands |
+| `dataset.py`, `master_data.py` | Veri setini güvenle okur; alias eşleştirmeli müşteri ve liman ana verisi |
+| `ingest.py`, `preprocess.py` | E-posta ayrıştırma; tek bozuk dosya toplu işi asla durdurmaz |
+| `extractor.py`, `recorded.py` | Model çağrısı, istem, şema, yeniden deneme; model çıktısını kaydet ve tekrar oynat |
+| `normalize.py`, `validators.py` | Sayı, ağırlık, ölçü ve tarih ayrıştırma; iş kuralları ve sorun kodları |
+| `db.py`, `repository.py` | Dört tablo ve tüm okuma/yazmalar |
+| `booking_tools.py`, `orchestrator.py` | Araçlar ve politika kapısı; e-posta başına bir transaction; planlayıcılar |
+| `query_tools.py`, `chatbot.py`, `ui/app.py` | Ortak salt okunur sorgular; doğal dil cevapları; Streamlit dashboard |
+| `cli.py` | Komutlar |
 
-### Data model
+### Veri modeli
 
-Four SQLite tables, created on first start and kept between runs:
+İlk açılışta oluşturulan ve çalıştırmalar arasında korunan dört SQLite tablosu:
 
-| Table | Holds |
+| Tablo | İçerik |
 |---|---|
-| `emails` | Original and cleaned text, intent, status, outcome, error, the model's raw output |
-| `bookings` | Trusted fields, `status`, VIN list, dimensions, the values as the model wrote them (`raw`), the source e-mail |
-| `booking_events` | `CREATE`, `UPDATE`, `CANCEL`, `DUPLICATE`, `FAILED_ACTION`, each with its source e-mail |
-| `validation_issues` | Code, field, severity, message, review status (booking or e-mail level) |
+| `emails` | Özgün ve temizlenmiş metin, niyet, durum, sonuç, hata, modelin ham çıktısı |
+| `bookings` | Güvenilir alanlar, `status`, VIN listesi, ölçüler, modelin yazdığı haliyle değerler (`raw`), kaynak e-posta |
+| `booking_events` | `CREATE`, `UPDATE`, `CANCEL`, `DUPLICATE`, `FAILED_ACTION`; her biri kaynak e-postasını taşır |
+| `validation_issues` | Kod, alan, önem, mesaj, inceleme durumu (booking veya e-posta düzeyinde) |
 
-Message intents: `CREATE_BOOKING`, `UPDATE_BOOKING`, `CANCEL_BOOKING`, `STATUS_INQUIRY`, `NON_BOOKING`, `UNKNOWN`.
-Booking status: `READY` (passed validation), `VALIDATION_REQUIRED` (a person must look), `CANCELLED`. `ASSIGNED`
-exists in the schema but is never set: no sailing is ever assigned.
+Mesaj niyetleri: `CREATE_BOOKING`, `UPDATE_BOOKING`, `CANCEL_BOOKING`, `STATUS_INQUIRY`, `NON_BOOKING`, `UNKNOWN`.
+Booking durumu: `READY` (doğrulamadan geçti), `VALIDATION_REQUIRED` (bir insanın bakması gerekir), `CANCELLED`. `ASSIGNED`
+şemada vardır ama hiçbir zaman atanmaz: hiçbir sefer ataması yapılmaz.
 
-## How unsafe or unclear input is handled
+## Güvensiz veya belirsiz girdi nasıl ele alınıyor
 
-- **Nothing is invented.** Missing values stay empty and appear as `MISSING_FIELD`. A value the model returns must occur
-  in the e-mail text; otherwise it is rejected (`VALUE_NOT_IN_SOURCE`). This also stops injected values.
-- **Ambiguity is kept, not resolved.** `JEDDAH / YANBU`, `SEPTEMBER SAILING`, `next available after 25/11/2026`,
-  a weight with no unit and `6,20 x 2.450 x 3,10 m` all stay unresolved and the booking needs validation.
-- **Invalid values are not corrected** (`31/02/2026` stays invalid).
-- **E-mail text is untrusted.** Quoted history is passed as context only; paragraphs that address the system
-  (`SYSTEM NOTE`, `ignore ... rules`, `invent ... values`) are withheld from the model and flag the e-mail for review.
-  The backend does not rely on the prompt: master data and the "must occur in the e-mail" check hold even if the model is fooled.
-- **UPDATE and CANCEL never create bookings.** Without a known booking the request is recorded as `FAILED_ACTION`.
-  A repeated request is a `DUPLICATE`; a repeat that contradicts a stored booking is `CONFLICT_REQUIRES_REVIEW` and
-  overwrites nothing; a cancelled booking is not revived.
-- **Tools are policy-checked.** Closed allowlist, strict argument schema, tool must fit the e-mail's intent, booking
-  reference must be the one in the e-mail. Arguments carry identifiers only; the data written always comes from the
-  validated draft.
-- **The chatbot is read-only** (no write intent exists, and its connection is read-only while it answers). An unknown
-  customer or port gives an empty answer, never "all bookings".
-- **Each e-mail is one transaction.** A failure rolls that e-mail back, is recorded, and the batch continues.
+- **Hiçbir şey uydurulmaz.** Eksik değerler boş kalır ve `MISSING_FIELD` olarak görünür. Modelin döndürdüğü bir değer e-posta
+  metninde geçmek zorundadır; geçmiyorsa reddedilir (`VALUE_NOT_IN_SOURCE`). Bu, enjekte edilmiş değerleri de durdurur.
+- **Belirsizlik çözülmez, korunur.** `JEDDAH / YANBU`, `SEPTEMBER SAILING`, `next available after 25/11/2026`,
+  birimsiz bir ağırlık ve `6,20 x 2.450 x 3,10 m` çözümsüz kalır ve booking doğrulama bekler.
+- **Geçersiz değerler düzeltilmez** (`31/02/2026` geçersiz kalır).
+- **E-posta metni güvenilmezdir.** Alıntı geçmişi yalnızca bağlam olarak verilir; sisteme hitap eden paragraflar
+  (`SYSTEM NOTE`, `ignore ... rules`, `invent ... values`) modelden saklanır ve e-postayı incelemeye işaretler.
+  Backend istemin güvenliğine yaslanmaz: ana veri ve "e-postada geçmeli" denetimi model kandırılsa bile geçerlidir.
+- **UPDATE ve CANCEL asla booking oluşturmaz.** Bilinen bir booking yoksa talep `FAILED_ACTION` olarak kaydedilir.
+  Tekrarlanan talep `DUPLICATE` olur; kayıtlı bir booking ile çelişen tekrar `CONFLICT_REQUIRES_REVIEW` olur ve hiçbir şeyin
+  üzerine yazmaz; iptal edilmiş bir booking yeniden canlandırılmaz.
+- **Araçlar politika denetiminden geçer.** Kapalı allowlist, katı argüman şeması, aracın e-postanın niyetine uyması,
+  booking referansının e-postadaki referans olması. Argümanlar yalnızca kimlik taşır; yazılan veri her zaman doğrulanmış
+  taslaktan gelir.
+- **Chatbot salt okunurdur** (yazma niyeti yoktur ve cevap verirken bağlantısı salt okunurdur). Bilinmeyen bir müşteri
+  veya liman boş cevap verir, asla "tüm booking'ler" değil.
+- **Her e-posta tek bir transaction'dır.** Bir hata o e-postayı geri alır, kaydedilir ve toplu iş devam eder.
 
-## Commands
+## Komutlar
 
 ```powershell
 $py = ".\.venv\Scripts\python.exe"
-& $py -m ugr_booking.cli inspect-dataset          # manifest and master-data checks
-& $py -m ugr_booking.cli parse-emails             # read and clean all e-mails (no model)
-& $py -m ugr_booking.cli extract  EMAIL-017       # model output for one e-mail, nothing saved
-& $py -m ugr_booking.cli validate EMAIL-019       # model plus business rules, nothing saved
-& $py -m ugr_booking.cli ingest                   # all e-mails into data/booking.sqlite3 (the model chooses the tool calls)
-& $py -m ugr_booking.cli ingest --planner direct --only EMAIL-008 EMAIL-012 EMAIL-013   # fixed rules instead of the model
-& $py -m ugr_booking.cli ingest --inbox examples/demo_inbox --db sqlite:///data/demo.sqlite3   # follow-ups: update, cancel, status
-& $py -m ugr_booking.cli list-bookings --events   # what is stored
-& $py -m ugr_booking.cli report                   # Markdown: every e-mail's outcome, bookings and events
-& $py -m ugr_booking.cli record-extractions       # save the model's output for all e-mails (data/private/extractions)
-& $py -m ugr_booking.cli ingest --extractions data/private/extractions   # offline replay, labelled as not live AI
+& $py -m ugr_booking.cli inspect-dataset          # manifest ve ana veri kontrolleri
+& $py -m ugr_booking.cli parse-emails             # tüm e-postaları oku ve temizle (model yok)
+& $py -m ugr_booking.cli extract  EMAIL-017       # tek e-posta için model çıktısı, hiçbir şey kaydedilmez
+& $py -m ugr_booking.cli validate EMAIL-019       # model + iş kuralları, hiçbir şey kaydedilmez
+& $py -m ugr_booking.cli ingest                   # tüm e-postalar data/booking.sqlite3'e (araç çağrılarını model seçer)
+& $py -m ugr_booking.cli ingest --planner direct --only EMAIL-008 EMAIL-012 EMAIL-013   # model yerine sabit kurallar
+& $py -m ugr_booking.cli ingest --inbox examples/demo_inbox --db sqlite:///data/demo.sqlite3   # takip e-postaları: güncelleme, iptal, durum
+& $py -m ugr_booking.cli list-bookings --events   # kayıtlı olanlar
+& $py -m ugr_booking.cli report                   # Markdown: her e-postanın sonucu, booking'leri ve olayları
+& $py -m ugr_booking.cli record-extractions       # tüm e-postalar için model çıktısını kaydet (data/private/extractions)
+& $py -m ugr_booking.cli ingest --extractions data/private/extractions   # çevrimdışı tekrar oynatma, canlı yapay zekâ değil diye etiketlenir
 & $py -m streamlit run ui/app.py                  # dashboard
-& $py -m pytest -q                                # tests (no model needed)
-& $py -m pytest --live -q                         # also regression checks that call the real model
+& $py -m pytest -q                                # testler (model gerekmez)
+& $py -m pytest --live -q                         # gerçek modeli çağıran regresyon kontrolleri de
 ```
 
-Dashboard tabs: **Overview** (KPIs and charts), **Bookings** (filterable table, row details, history, source e-mail),
-**Needs attention** (why each booking needs validation, requests that could not be applied), **Chat**. Chat answers filter and
-highlight the dashboard automatically. Example questions: *How many bookings does ABC Shipping have?* - *Show bookings with
-Izmir as the port of loading.* - *Which bookings require validation?* - *Summarize the latest three bookings.* - *What is the
-status of BOOKINGREF-D100?* - *Show cancelled bookings.*
+Dashboard sekmeleri: **Overview** (KPI'lar ve grafikler), **Bookings** (filtrelenebilir tablo, satır detayı, geçmiş, kaynak
+e-posta), **Needs attention** (her booking'in neden doğrulama gerektirdiği, uygulanamayan talepler), **Chat**. Chat cevapları
+dashboard'u otomatik olarak filtreler ve vurgular. Örnek sorular: *How many bookings does ABC Shipping have?* - *Show
+bookings with Izmir as the port of loading.* - *Which bookings require validation?* - *Summarize the latest three bookings.* -
+*What is the status of BOOKINGREF-D100?* - *Show cancelled bookings.*
 
-Follow-up demo: `examples/demo_inbox` holds six **invented** e-mails (change a date, change a quantity, reject an unknown
-customer, ask a status, cancel, change an unknown reference) that run against the stored bookings. Their model output is
-recorded in `examples/demo_recording`, so the demo also runs offline (clearly labelled as a replay).
+Takip e-postası demosu: `examples/demo_inbox` içinde **uydurma** altı e-posta vardır (tarih değiştir, adet değiştir,
+bilinmeyen müşteriyi reddet, durum sor, iptal et, bilinmeyen referansı değiştir) ve kayıtlı booking'lere karşı çalışır. Model
+çıktıları `examples/demo_recording` içinde kayıtlıdır, bu yüzden demo çevrimdışı da çalışır (tekrar oynatma olduğu açıkça yazılır).
 
-Demo: [docs/demo_akisi.md](docs/demo_akisi.md) is the fixed walkthrough (Turkish) and `scripts/demo.ps1` prepares and resets it
+Demo: [docs/demo_akisi.md](docs/demo_akisi.md) sabit demo akışıdır, `scripts/demo.ps1` bunu hazırlar ve sıfırlar
 (`preflight`, `prepare`, `reset`, `dashboard`, `followup`, `followup-offline`, `status`).
 
-More detail: [extraction](docs/step_2.md), [validation](docs/step_3.md), [persistence and tools](docs/step_4.md),
-[dashboard](docs/step_5.md), [chatbot](docs/step_6.md), [test and batch run record](docs/run_record.md),
-[setup decisions](docs/decisions.md).
+Daha fazla ayrıntı: [çıkarım](docs/step_2.md), [doğrulama](docs/step_3.md), [kalıcılık ve araçlar](docs/step_4.md),
+[dashboard](docs/step_5.md), [chatbot](docs/step_6.md), [test ve toplu çalıştırma kaydı](docs/run_record.md),
+[kurulum kararları](docs/decisions.md).
 
-## Configuration and private data
+## Yapılandırma ve özel veri
 
-`.env.example` lists names only. `DATASET_PATH` (default `data/private/dataset`), `DATABASE_URL`
-(default `sqlite:///data/booking.sqlite3`), `OLLAMA_URL` and `OLLAMA_MODEL`. No API key is needed anywhere.
+`.env.example` yalnızca isimleri listeler: `DATASET_PATH` (varsayılan `data/private/dataset`),
+`DATABASE_URL` (varsayılan `sqlite:///data/booking.sqlite3`), `OLLAMA_URL` ve `OLLAMA_MODEL`. Hiçbir yerde API anahtarı gerekmez.
 
-The dataset is confidential data. It, the databases, the recorded model output and the logs live under
-`data/` and are excluded from Git; a test checks that no secrets, databases or dataset content are tracked. Tests use invented data.
+Veri seti gizli veri setidir. Paket, veritabanları, kaydedilmiş model çıktıları ve loglar `data/` altında durur ve
+Git dışında tutulur; bir test hiçbir gizli bilgi, veritabanı ya da dataset içeriğinin takip edilmediğini denetler. Testler uydurma veri kullanır.
 
-## Definitions
+## Tanımlar
 
-- **Latest** booking = the one whose request e-mail arrived most recently (not processing time).
-- **Cancelled** bookings are counted in totals and the chatbot says so.
-- **Needs validation** = status `VALIDATION_REQUIRED`. Non-booking e-mails are never counted as bookings.
+- **En son** booking = istek e-postası en geç gelen booking (işlem zamanı değil).
+- **İptal edilmiş** booking'ler toplamlara dahildir ve chatbot bunu söyler.
+- **Doğrulama gerekli** = durum `VALIDATION_REQUIRED`. Booking olmayan e-postalar asla booking olarak sayılmaz.
 
-## Assumptions
+## Varsayımlar
 
-- Numeric dates are **day-first** (the data contains `22/11` and `28/10`, which only fit that way); two-digit years mean 20xx.
-- Weights are **kilograms only**. `7.650`, `12,400`, `7 450` are thousands; `12.500,50` has a decimal comma. A weight without
-  "each" for several units is not stored per unit. Dimensions are length x width x height and become metres.
-- A booking is `READY` only if customer, both ports, cargo, quantity and a real requested date are present, match the master
-  data and raise no error. Contact, vessel and voyage are optional. Nothing is ever `ASSIGNED`.
-- Customers and ports match **exactly** (capitalisation and accents are ignored) against names, aliases and port codes. No fuzzy matching.
-- A repeat is the same booking if it has the same reference or the identical, non-empty set of VINs.
-- The supplied VINs are synthetic: only count, duplicates and consistent format within a booking are checked, not the real VIN standard.
-- Quoted history is context, never the instruction. Attachments are not read. No time zone is assumed.
-- Single user, local SQLite.
+- Sayısal tarihler **gün-ay-yıl** okunur (veride yalnızca bu şekilde anlamlı olan `22/11` ve `28/10` var); iki haneli yıl 20xx demektir.
+- Ağırlıklar **yalnızca kilogramdır**. `7.650`, `12,400`, `7 450` binlik ayraçtır; `12.500,50` ondalık virgüllüdür. Birden çok araç
+  için "each" olmayan ağırlık araç başına saklanmaz. Ölçüler uzunluk x genişlik x yüksekliktir ve metreye çevrilir.
+- Bir booking yalnızca müşteri, iki liman, kargo, adet ve gerçek bir istenen tarih varsa, ana veriyle eşleşiyorsa ve hata
+  üretmiyorsa `READY` olur. İletişim, vessel ve voyage isteğe bağlıdır. Hiçbir şey `ASSIGNED` olmaz.
+- Müşteriler ve limanlar isimler, alias'lar ve liman kodlarıyla **tam** eşleşir (büyük/küçük harf ve aksan duyarsız). Bulanık eşleştirme yoktur.
+- Aynı referansa ya da birebir aynı, boş olmayan VIN kümesine sahip tekrar, aynı booking sayılır.
+- Verilen VIN'ler sentetiktir: yalnızca bir booking içinde sayı, tekrar ve tutarlı biçim denetlenir, gerçek VIN standardı değil.
+- Alıntı geçmişi bağlamdır, asla talimat değildir. Ek dosyalar okunmaz. Saat dilimi varsayılmaz.
+- Tek kullanıcı, yerel SQLite.
 
-## Results on the supplied e-mails
+## Sağlanan e-postalardaki sonuçlar
 
-Measured with `qwen3:8b` on an RTX 4060 (details in [docs/run_record.md](docs/run_record.md)):
+RTX 4060 üzerinde `qwen3:8b` ile ölçüldü (ayrıntılar [docs/run_record.md](docs/run_record.md) içinde):
 
-- 34 of 34 e-mails processed, 0 failures; 23 booking drafts: 9 `READY`, 14 `VALIDATION_REQUIRED`; 1 duplicate, 1 cancellation.
-- 6 follow-up e-mails could not be applied because their original booking is not in the package; they are recorded, nothing is invented.
-- The model chose 49 tool calls, the fixed rules had to complete none, and the policy gate refused 15 unnecessary model calls.
-- Two independent recordings of the model output were identical; a later live run in a clean clone differed in one optional,
-  non-blocking field (a voyage warning on one e-mail). Re-running `ingest` adds nothing.
-- Time: model extraction takes about 7.5 seconds per e-mail (256 seconds for all 34); a complete `ingest` with model-chosen
-  tool calls took 6 to 9 minutes in repeated runs; no API cost.
-- 313 tests pass without the model, 335 with `--live`.
+- 34 e-postanın 34'ü işlendi, 0 hata; 23 booking taslağı: 9 `READY`, 14 `VALIDATION_REQUIRED`; 1 duplicate, 1 iptal.
+- 6 takip e-postası uygulanamadı, çünkü özgün booking'leri pakette yok; kaydedildiler, hiçbir şey uydurulmadı.
+- Model 49 araç çağrısı seçti, sabit kuralların tamamlaması gereken hiçbir şey olmadı ve politika kapısı modelin 15 gereksiz çağrısını reddetti.
+- Model çıktısının iki bağımsız kaydı aynıydı; temiz klonda sonraki bir canlı çalıştırma isteğe bağlı, engellemeyen tek bir alanda
+  (bir e-postada voyage uyarısı) farklıydı. `ingest` komutunu tekrar çalıştırmak hiçbir şey eklemez.
+- Süre: model çıkarımı e-posta başına yaklaşık 7,5 saniye sürer (34'ü için 256 saniye); modelin araç seçtiği tam bir `ingest`
+  tekrarlanan çalıştırmalarda 6 ila 9 dakika sürdü; API maliyeti yok.
+- Model olmadan 320 test, `--live` ile 342 test geçiyor.
 
-## Testing
+## Test
 
-Unit tests cover parsing, normalisation, validation, the tool policy, persistence, the chatbot and the dashboard (run
-headless). Failure paths covered include bad input, a down model, a rollback in the middle of an e-mail and a model that
-chooses the wrong tool or no tool. `tests/test_scenarios.py` runs all 34 supplied e-mails through the whole pipeline on a
-recorded model output and checks the expected outcome for each; `tests/test_live.py --live` re-checks the key outcomes with the
-real model. The scenarios need the local dataset and recording, so they are skipped on a machine without them.
-The scenario expectations are hypotheses from reading the e-mails, not an official answer key.
+Birim testleri ayrıştırma, normalleştirme, doğrulama, araç politikası, kalıcılık, chatbot ve dashboard'u (başsız çalıştırılır)
+kapsar. Kapsanan hata yolları: bozuk girdi, kapalı model, bir e-postanın ortasında geri alma ve yanlış araç ya da hiç araç seçen
+model. `tests/test_scenarios.py` verilen 34 e-postanın tamamını kaydedilmiş bir model çıktısı üzerinde tüm hattan geçirir ve her
+biri için beklenen sonucu denetler; `tests/test_live.py --live` temel sonuçları gerçek modelle yeniden denetler. Senaryolar yerel
+veri setini ve kaydı gerektirir, bu yüzden bunlar olmayan bir makinede atlanır. Senaryo beklentileri e-postalar okunarak çıkarılmış
+hipotezlerdir, resmî bir cevap anahtarı değildir.
 
-## Known limitations
+## Bilinen sınırlamalar
 
-- **UPDATE value extraction is not reliable on complex messages** (for example one revised booking listing removed bills of
-  lading). Backend checks catch some cases (quantity against VIN count; invalid values are not applied), but production
-  needs a human approval step for updates.
-- **Temperature 0 does not make the model bit-for-bit repeatable.** One optional field differed between two live runs, so the
-  regression tests replay a recorded model output instead of calling the model.
-- **The model is sensitive to the prompt.** Small wording changes flipped the intent of ambiguous e-mails during development;
-  the prompt now uses examples and the scenario and live tests guard it. Re-record and re-run `--live` after changing the prompt or model.
-- The supplied follow-ups point to bookings that are not in the package, so the update path was shown on real data only with
-  the invented demo e-mails.
-- Duplicate detection needs a reference or identical VINs. The injection filter is a limited pattern list; the
-  "value must occur in the e-mail" check is the second line of defence.
-- Attachments are not read (a booking whose details are "in the attached Excel" stays `VALIDATION_REQUIRED`).
-- Review is visible but there is no screen to approve or resolve an issue; issues stay `OPEN`.
-- No structured logging or containers. SQLite is single-user; the dashboard is read-only.
-- Only 34 synthetic e-mails were available, so no general accuracy claim is made.
+- **UPDATE değer çıkarımı karmaşık mesajlarda güvenilir değildir** (örneğin kaldırılan konşimentoları listeleyen revize bir
+  booking). Backend denetimleri bazı durumları yakalar (adet ile VIN sayısı; geçersiz değerler uygulanmaz), ama üretimde
+  güncellemeler için insan onayı gerekir.
+- **Sıcaklık 0, modeli bit düzeyinde tekrarlanabilir yapmaz.** İki canlı çalıştırmada isteğe bağlı bir alan farklı çıktı; bu yüzden
+  regresyon testleri modeli çağırmak yerine kaydedilmiş bir model çıktısını tekrar oynatır.
+- **Model isteme duyarlıdır.** Geliştirme sırasında küçük ifade değişiklikleri belirsiz e-postaların niyetini çevirdi; istem artık
+  örnek kullanıyor ve senaryo ile canlı testler onu koruyor. İstemi ya da modeli değiştirdikten sonra kaydı yenile ve `--live` testlerini yeniden çalıştır.
+- Verilen takip e-postaları pakette olmayan booking'lere işaret eder; bu yüzden güncelleme yolu gerçek veride yalnızca uydurma
+  demo e-postalarıyla gösterildi.
+- Duplicate tespiti bir referans ya da birebir aynı VIN'ler ister. Enjeksiyon filtresi sınırlı bir kalıp listesidir; "değer
+  e-postada geçmeli" denetimi ikinci savunma hattıdır.
+- Ek dosyalar okunmaz ("ekteki Excel'de" ayrıntısı olan bir booking `VALIDATION_REQUIRED` kalır).
+- İnceleme görünürdür ama bir sorunu onaylayacak ya da çözecek bir ekran yoktur; sorunlar `OPEN` kalır.
+- Yapılandırılmış log ve konteyner yok. SQLite tek kullanıcılıdır; dashboard salt okunurdur.
+- Yalnızca 34 sentetik e-posta vardı, bu yüzden genel bir doğruluk iddiası yoktur.
 
-## What I would do next
+## Sonra ne yapardım
 
-1. **Human review screen:** resolve issues, confirm or reject updates before they are applied, with an audit trail.
-2. A larger, labelled evaluation set, a confidence score per field and a comparison of models.
-3. Attachment parsing (Excel/PDF), mailbox integration and a queue instead of a batch command.
-4. Authentication and roles, PostgreSQL, structured logging and monitoring, a container image.
+1. **İnsan inceleme ekranı:** sorunları çöz, güncellemeleri uygulanmadan önce onayla ya da reddet, denetim izi ile.
+2. Daha büyük, etiketli bir değerlendirme seti, alan başına güven puanı ve modellerin karşılaştırılması.
+3. Ek dosya ayrıştırma (Excel/PDF), posta kutusu entegrasyonu ve toplu komut yerine bir kuyruk.
+4. Kimlik doğrulama ve roller, PostgreSQL, yapılandırılmış loglama ve izleme, bir konteyner imajı.
 
-## Project layout
+## Proje yapısı
 
 ```text
-src/ugr_booking/   Application package
+src/ugr_booking/   Uygulama paketi
 ui/                Streamlit dashboard (ui/app.py)
-examples/          Invented follow-up e-mails for the update/cancel demo
-tests/             Unit, end-to-end, scenario, live and repository-hygiene tests
-docs/              Per-step notes, run record, setup decisions
-data/private/      Dataset and local recordings (excluded from Git)
+examples/          Güncelleme/iptal demosu için uydurma takip e-postaları
+tests/             Birim, uçtan uca, senaryo, canlı ve depo hijyeni testleri
+docs/              Adım notları, çalışma kaydı, kurulum kararları
+data/private/      Veri seti ve yerel kayıtlar (Git dışında)
 ```
