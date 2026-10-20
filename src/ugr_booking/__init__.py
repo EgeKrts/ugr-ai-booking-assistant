@@ -1,4 +1,1 @@
-"""AI Booking Intake & Operations Assistant.
-
-Milestone 1.1 establishes the package and environment only.
-"""
+"""Controlled AI booking assistant; dataset metadata loading is implemented."""

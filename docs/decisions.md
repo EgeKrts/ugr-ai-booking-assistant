@@ -67,3 +67,24 @@ Python sürümü, kullanılan sanal ortam, kurulu bağımlılıklar, paket impor
 `pip check`, Git dışlama kuralları ve ilk commit kontrol edilir. Bunlar kurulum
 kontrolleridir. E-posta okuma, LLM kalitesi veya booking doğruluğu henüz test
 edilmiş sayılmaz. **1.2 başlamadan durulur.**
+
+## 1.2 — Manifest, ana veri ve tip sözleşmesi
+
+Manifest hangi girdilerin mevcut olduğunu ve alınma zamanını belirler. Dosya adı
+sırasına güvenmeyiz; parse edilmiş zamanla sıralarız. Kaynak zamanlarda saat
+dilimi bulunmadığından kendimiz UTC veya yerel saat dilimi eklemeyiz.
+
+Klasör ve ZIP aynı DatasetSource arayüzünden okunur. ZIP açılmaz; yalnızca
+bellekte izinli dosyalar okunur. Mutlak yollar, üst klasöre geçiş ve kök dışına
+çözülen yollar reddedilir. Müşteri ve liman alias listeleri aynen korunur;
+eşleştirme/normalizasyon kuralları ilgili validation adımında eklenecektir.
+
+BookingDraft, verilen 20 alanın Pydantic karşılığıdır. String miktar veya bool
+miktar sessizce sayıya çevrilmez. Geçersiz ya da göreli tarih kesin tarihe
+çevrilmez; bilinmeyen iş alanları null kalır. Bu yapı tek başına booking
+onayı değildir. İş kuralları ve kontrollü yazma sonraki adımlara aittir.
+
+Harici şema kod olarak çalıştırılmaz. Uygulamanın desteklediği alan ve enum
+sözleşmesiyle karşılaştırılır; beklenmeyen değişiklik açık hata verir.
+Paket yapısındaki bir sorun inceleme komutunu kontrollü hatayla bitirir.
+E-posta bazlı hatadan sonra devam etme, gövde ayrıştırma adımında uygulanacaktır.
