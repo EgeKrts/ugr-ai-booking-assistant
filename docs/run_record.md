@@ -19,7 +19,7 @@ Sayılar tek bir çalıştırmaya aittir; e-posta metni içermez, yalnızca ID, 
 | İncelemeye giden e-posta | 19 |
 | İkinci çalıştırma | 34 atlandı, yeni satır **0** |
 | Canlı çalıştırma ile kayıttan oynatma | Rapor **birebir aynı** |
-| Model kararlılığı | Aynı istemle iki bağımsız kayıt, 34 e-postanın tamamında aynı çıktı (serbest metin notları hariç) |
+| Model kararlılığı | Aynı istemle iki bağımsız kayıt, 34 e-postanın tamamında aynı çıktı (serbest metin notları hariç). **Garanti değildir:** sonraki bir canlı çalıştırmada EMAIL-002'nin isteğe bağlı `voyage` alanı farklı çıktı (engellemeyen uyarı) |
 
 **Süre ve maliyet.** Model çıkarımı toplam 256 sn, e-posta başına ortalama 7,5 sn (en yavaş 11,1 sn; boş gövde
 0 sn, çünkü modele gitmez). Model yerel çalışır, API ücreti yoktur. Token sayısı ölçülmedi.
@@ -131,3 +131,20 @@ booking'ler): tarih güncellemesi uygulandı, adet güncellemesi kaydı inceleme
 uygulanmadı, iptal ve durum sorgusu çalıştı, olmayan referans booking oluşturmadı (tablo: [step_4](step_4.md)).
 
 Chat cevapları artık dashboard'u otomatik filtreler ve vurgular ([step_6](step_6.md)).
+
+## 8. Temiz klonda doğrulama
+
+Kaynak: `git clone` ile yalnızca commit'li dosyalar, yeni Python 3.12.14 sanal ortamı, README'nin adımları.
+
+| Adım | Sonuç |
+|---|---|
+| `pip install -r requirements.txt` | Sorunsuz, yaklaşık 49 sn |
+| `pip install -e .` (ek bayrak yok), `pip check` | Sorunsuz, "No broken requirements found" |
+| Python 3.10 ile aynı adımlar | Pip açık mesaj verir: `requires a different Python: 3.10.9 not in '<3.13,>=3.11'` |
+| `pytest -q`, veri paketi ve kayıt **olmadan** | 255 geçti, 39 atlandı, 0 başarısız |
+| Veri paketi yerleştirildikten sonra `ingest` (gerçek model) | 34/34, 0 hata, 23 booking, model 49 / kurallar 0 / reddedilen 15, süre **9 dk 5 sn** |
+| `pytest -q`, veri paketi **ile** | 275 geçti, 23 atlandı (senaryo kaydı ve canlı testler), 0 başarısız |
+| `streamlit run ui/app.py` | Sunucu açıldı, sağlık ve ana sayfa HTTP 200, temiz log |
+
+Bu denemenin bulduğu ve düzeltilen sorunlar: veri paketi yokken hata mesajı yolu ve çözümü söylemiyordu; `list-bookings` ve `report`
+olmayan bir veritabanında boş bir dosya oluşturuyordu; README süre tahmini (5 dk) gerçeğin (5–10 dk) altındaydı.

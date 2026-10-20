@@ -19,7 +19,7 @@ Anything the system is not sure about is flagged for review instead of guessed.
 
 ## Quick start (Windows PowerShell)
 
-1. Install Python 3.11/3.12 and [Ollama](https://ollama.com), then pull the model (about 5 GB, runs on an 8 GB GPU):
+1. Install **Python 3.11 or 3.12** (the package refuses other versions) and [Ollama](https://ollama.com), then pull the model (about 5 GB, runs on an 8 GB GPU):
 
    ```powershell
    ollama pull qwen3:8b
@@ -39,7 +39,7 @@ Anything the system is not sure about is flagged for review instead of guessed.
    data/private/dataset/      (manifest.json, emails/, master_data/; a ZIP also works)
    ```
 
-4. Process the e-mails (about 5 minutes with the model), then open the dashboard:
+4. Process the e-mails (5 to 10 minutes with the model on an 8 GB GPU), then open the dashboard:
 
    ```powershell
    .\.venv\Scripts\python.exe -m ugr_booking.cli ingest
@@ -208,8 +208,10 @@ Measured with `qwen3:8b` on an RTX 4060 (details in [docs/run_record.md](docs/ru
 - 34 of 34 e-mails processed, 0 failures; 23 booking drafts: 9 `READY`, 14 `VALIDATION_REQUIRED`; 1 duplicate, 1 cancellation.
 - 6 follow-up e-mails could not be applied because their original booking is not in the package; they are recorded, nothing is invented.
 - The model chose 49 tool calls, the fixed rules had to complete none, and the policy gate refused 15 unnecessary model calls.
-- Two independent recordings of the model output were identical; re-running `ingest` adds nothing.
-- Time: about 7.5 seconds per e-mail (256 seconds for all 34); no API cost.
+- Two independent recordings of the model output were identical; a later live run in a clean clone differed in one optional,
+  non-blocking field (a voyage warning on one e-mail). Re-running `ingest` adds nothing.
+- Time: model extraction takes about 7.5 seconds per e-mail (256 seconds for all 34); a complete `ingest` with model-chosen
+  tool calls took 6 to 9 minutes in repeated runs; no API cost.
 - 313 tests pass without the model, 335 with `--live`.
 
 ## Testing
@@ -226,6 +228,8 @@ The scenario expectations are hypotheses from reading the e-mails, not an offici
 - **UPDATE value extraction is not reliable on complex messages** (for example one revised booking listing removed bills of
   lading). Backend checks catch some cases (quantity against VIN count; invalid values are not applied), but production
   needs a human approval step for updates.
+- **Temperature 0 does not make the model bit-for-bit repeatable.** One optional field differed between two live runs, so the
+  regression tests replay a recorded model output instead of calling the model.
 - **The model is sensitive to the prompt.** Small wording changes flipped the intent of ambiguous e-mails during development;
   the prompt now uses examples and the scenario and live tests guard it. Re-record and re-run `--live` after changing the prompt or model.
 - The supplied follow-ups point to bookings that are not in the package, so the update path was shown on real data only with
