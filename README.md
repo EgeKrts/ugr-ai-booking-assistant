@@ -6,7 +6,7 @@ stored data.
 
 **Current scope: backend complete through step 4.** E-mails are parsed, read by a local
 LLM, checked by deterministic rules and applied to a SQLite database through controlled
-tools. The dashboard (step 5) and chatbot (step 6) are not built yet.
+tools. An interactive dashboard reads the same database; the chatbot (step 6) is not built yet.
 
 ```text
 E-mail -> preprocess -> LLM extraction -> validation -> tool policy gate -> SQLite
@@ -65,11 +65,12 @@ $py = ".\.venv\Scripts\python.exe"
 & $py -m ugr_booking.cli ingest                   # all e-mails into data/booking.sqlite3
 & $py -m ugr_booking.cli ingest --planner llm --only EMAIL-008 EMAIL-012 EMAIL-013
 & $py -m ugr_booking.cli list-bookings --events   # what is stored
+& $py -m streamlit run ui/app.py                  # dashboard on http://localhost:8501
 & $py -m pytest -q                                # tests need no model
 ```
 
 `ingest` is repeatable: e-mails already stored are skipped, so a second run adds nothing.
-Details: [extraction](docs/step_2.md), [validation](docs/step_3.md), [persistence and tools](docs/step_4.md).
+Details: [extraction](docs/step_2.md), [validation](docs/step_3.md), [persistence and tools](docs/step_4.md), [dashboard](docs/step_5.md).
 
 ## Configuration and private data
 
@@ -100,7 +101,7 @@ See [step 1.2 and its limits](docs/step_1_2.md).
 
 ```text
 src/ugr_booking/   Python application package (ingest, extractor, validators, tools, orchestrator)
-ui/               Future Streamlit entry point
+ui/               Streamlit dashboard (ui/app.py)
 tests/            Unit and end-to-end tests with invented fixtures (no model needed)
 docs/             Decision notes (architecture diagram lives in this README)
 data/private/     Local inputs, excluded from Git
