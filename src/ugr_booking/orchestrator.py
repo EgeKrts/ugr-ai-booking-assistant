@@ -237,7 +237,11 @@ class Orchestrator:
     def ingest(self, emails: list[EmailRecord], on_email=None) -> BatchReport:
         report = BatchReport()
         for email in sorted(emails, key=lambda e: (e.received_at, e.email_id)):
-            outcome = self.process_email(email)
+            try:
+                outcome = self.process_email(email)
+            except Exception as exc:
+                # Even failure-record persistence can fail; keep the batch moving and expose it in the report.
+                outcome = EmailOutcome(email.email_id, status="FAILED", error=f"{type(exc).__name__}: {exc}")
             report.outcomes.append(outcome)
             if on_email:
                 on_email(outcome)
@@ -249,11 +253,15 @@ class Orchestrator:
             if existing is not None and existing.status in DONE_STATUSES:
                 return EmailOutcome(email.email_id, existing.intent, existing.status, skipped=True)
 
+        intent = None
         try:
             extraction = self.extractor.extract(email)
+            intent = extraction.intent.value
+            validation = validate_extraction(email, extraction, self.master)
         except ExtractionError as exc:
-            return self._record_failure(email, None, str(exc))
-        validation = validate_extraction(email, extraction, self.master)
+            return self._record_failure(email, intent, str(exc))
+        except Exception as exc:
+            return self._record_failure(email, intent, f"{type(exc).__name__}: {exc}")
         outcome = EmailOutcome(email.email_id, validation.intent.value)
 
         try:

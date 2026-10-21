@@ -275,3 +275,36 @@ def test_a_model_outage_in_the_default_mode_keeps_nothing_and_retries_later():
                                                 planner=GuardedLLMPlanner(llm=Down([])))
     [outcome] = orchestrator.ingest([mail(1, BODY)]).outcomes
     assert outcome.status == "FAILED" and count(engine, BookingRow) == 0
+
+
+# ------------------------------------------------------ validation-failure regressions
+
+def test_validation_exception_is_recorded_and_next_email_still_runs(monkeypatch):
+    import ugr_booking.orchestrator as module
+    original = module.validate_extraction
+
+    def fail_first(email, extraction, master):
+        if email.email_id == "EXAMPLE-001":
+            raise ValueError("malformed validation input")
+        return original(email, extraction, master)
+
+    monkeypatch.setattr(module, "validate_extraction", fail_first)
+    script = {f"EXAMPLE-00{i}": result(CREATE, bookings=[booking()]) for i in (1, 2)}
+    orchestrator, engine, _ = make_orchestrator(script)
+    report = orchestrator.ingest([mail(1, BODY), mail(2, BODY)])
+    assert [o.status for o in report.outcomes] == ["FAILED", "PROCESSED"]
+    assert count(engine, BookingRow) == 1 and count(engine, EmailRow) == 2
+    failed = next(e for e in rows(engine, EmailRow) if e.email_id == "EXAMPLE-001")
+    assert "malformed validation input" in failed.error
+
+
+def test_extreme_weight_is_reviewed_without_stopping_the_next_email():
+    huge = "9" * 400
+    first_body = BODY.replace("7.650", huge).replace("TESTVIN0001", "TESTVIN0003").replace("TESTVIN0002", "TESTVIN0004")
+    script = {"EXAMPLE-001": result(CREATE, bookings=[
+                    booking(weight_text=huge + " KG each", vin_list=["TESTVIN0003", "TESTVIN0004"])]),
+              "EXAMPLE-002": result(CREATE, bookings=[booking()])}
+    orchestrator, engine, _ = make_orchestrator(script)
+    report = orchestrator.ingest([mail(1, first_body), mail(2, BODY)])
+    assert [o.status for o in report.outcomes] == ["REVIEW_REQUIRED", "PROCESSED"]
+    assert count(engine, BookingRow) == 2 and count(engine, EmailRow) == 2

@@ -79,6 +79,9 @@ def apply_to_bookings_tab(flt: BookingFilter, options: dict[str, list[str]]) -> 
     st.session_state["f_ports"] = [p for p in flt.ports_either if p in options["pols"] or p in options["pods"]]
     st.session_state["f_statuses"] = keep(flt.statuses, "statuses")
     st.session_state["f_text"] = flt.text
+    # Chat queries cover all stored records, so old sidebar dates must not narrow their answer.
+    st.session_state["f_use_dates"] = False
+    st.session_state.pop("f_dates", None)
 
 
 def clear_chat_focus() -> None:
@@ -90,7 +93,7 @@ def chat_tab(url: str) -> None:
     service = chat_service(url)
     st.caption("Answers come only from the booking database and are built from the matching rows. "
                "This assistant is read-only: it cannot change, create or cancel anything. "
-               "Each answer also filters and highlights the dashboard.")
+               "Chat searches all stored bookings. Each matching answer replaces sidebar filters, including dates, and highlights the dashboard.")
     if service is None:
         st.warning("The chat needs the master data (customer and port aliases). Put the dataset in "
                    "`data/private/dataset` or set `DATASET_PATH`.")

@@ -11,9 +11,10 @@ from ugr_booking.query_tools import (
 )
 
 
-def body(customer="Example Carrier", pol="GENOA", pod="JEDDAH", day="18-11-2026", ref=None, vins=("TESTVIN0001", "TESTVIN0002")):
+def body(customer="Example Carrier", pol="GENOA", pod="JEDDAH", day="18-11-2026", ref=None, vins=("TESTVIN0001", "TESTVIN0002"), quantity=2):
     text_ = (BODY.replace("Example Carrier", customer).replace("GENOA", pol).replace("JEDDAH", pod)
-             .replace("18-11-2026", day).replace("TESTVIN0001", vins[0]).replace("TESTVIN0002", vins[1]))
+             .replace("18-11-2026", day).replace("TESTVIN0001", vins[0]).replace("TESTVIN0002", vins[1])
+             .replace("2 x TRUCK", f"{quantity} x TRUCK"))
     return with_ref(ref, text_) if ref else text_
 
 
@@ -22,9 +23,10 @@ def entry(number, **kw):
     vins = kw.pop("vins", ("TESTVIN0001", "TESTVIN0002"))
     ref = kw.pop("ref", None)
     day = kw.pop("day", "18-11-2026")
-    fields = dict(vin_list=list(vins), requested_date_text=day, booking_ref=ref)
+    fields = dict(vin_list=list(vins), requested_date_text=day, booking_ref=ref,
+                  cargo_description=f"{kw.get('quantity', 2)} x TRUCK")
     fields.update({k: v for k, v in kw.items() if k in ("customer", "pol", "pod", "quantity")})
-    return mail(number, body(kw.get("customer", "Example Carrier"), kw.get("pol", "GENOA"), kw.get("pod", "JEDDAH"), day, ref, vins)), \
+    return mail(number, body(kw.get("customer", "Example Carrier"), kw.get("pol", "GENOA"), kw.get("pod", "JEDDAH"), day, ref, vins, kw.get("quantity", 2))), \
         result(CREATE, bookings=[booking(**fields)])
 
 

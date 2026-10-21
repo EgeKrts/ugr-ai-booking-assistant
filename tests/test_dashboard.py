@@ -1,4 +1,5 @@
 """Run the real Streamlit page headless against a temporary database."""
+from datetime import date
 from pathlib import Path
 import pytest
 from sqlalchemy import text
@@ -211,3 +212,15 @@ def test_chat_example_questions_and_clear(monkeypatch, chat_url):
     assert "BKG-00001" in all_markdown(at)
     next(b for b in at.button if b.label == "Clear conversation").click().run()
     assert len(at.chat_message) == 0
+
+
+def test_chat_count_replaces_an_old_requested_date_filter(monkeypatch, chat_url):
+    at = run(monkeypatch, chat_url)
+    at.sidebar.checkbox(key="f_use_dates").check().run()
+    at.sidebar.date_input(key="f_dates").set_value((date(2030, 1, 1), date(2030, 12, 31))).run()
+    assert metrics(at)["Total bookings"] == "0"
+    at.chat_input[0].set_value("How many bookings are there?").run()
+    assert not at.exception
+    assert at.sidebar.checkbox(key="f_use_dates").value is False
+    assert metrics(at)["Total bookings"] == "3"
+    assert "**3** booking(s)" in all_markdown(at)

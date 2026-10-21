@@ -142,7 +142,7 @@ def test_quantity_must_be_positive(quantity):
 # -------------------------------------------------------------------- VINs
 
 def test_quantity_vin_mismatch_requires_review():
-    result = check(quantity=3)
+    result = check(body=BODY.replace("2 x TRUCK", "3 x TRUCK"), cargo_description="3 x TRUCK", quantity=3)
     assert "VIN_COUNT_MISMATCH" in codes(result)
     assert draft(result).processing_status == ProcessingStatus.VALIDATION_REQUIRED
     assert draft(result).quantity == 3  # the stated quantity is kept, not "fixed" from the VIN count
@@ -311,3 +311,99 @@ def test_voyage_without_a_number_is_not_stored():
     body = BODY + "ex GENOA\n"
     result = check(body=body, voyage="ex GENOA")
     assert draft(result).voyage is None and "VOYAGE_UNRECOGNISED" in codes(result)
+
+
+# -------------------------------------------------------- source-evidence regressions
+
+def test_unstated_model_fields_cannot_become_ready():
+    body = "POL: GENOA\nPOD: JEDDAH\nRequested date: 18-11-2026\n"
+    result = check(body=body, customer="Sample Freight", cargo_description="HELICOPTER", quantity=999,
+                   vin_list=[], weight_text=None, dimensions_text=None, vessel="Invented Vessel",
+                   voyage="999Z", rate_text="EUR 9999", contact_name="Invented Person",
+                   contact_email="madeup@example.test")
+    d = draft(result)
+    assert d.processing_status == ProcessingStatus.VALIDATION_REQUIRED
+    assert (d.customer, d.cargo_description, d.quantity, d.vessel, d.voyage, d.rate_text,
+            d.contact_name, d.contact_email) == (None,) * 8
+    assert "VALUE_NOT_IN_SOURCE" in codes(result)
+
+
+def test_customer_canonical_name_can_be_supported_by_a_source_alias():
+    result = check(body=BODY.replace("Example Carrier", "ExCar"))
+    assert draft(result).customer == "Example Carrier"
+    assert draft(result).processing_status == ProcessingStatus.READY
+
+
+@pytest.mark.parametrize("quantity", [999, 2**63])
+def test_quantity_needs_source_evidence_and_a_storable_range(quantity):
+    result = check(body="Booking ref REF-999\nPOL: GENOA\nPOD: JEDDAH\nDate: 18-11-2026",
+                   quantity=quantity, vin_list=[])
+    assert draft(result).quantity is None
+    assert draft(result).processing_status == ProcessingStatus.VALIDATION_REQUIRED
+
+
+def test_model_cannot_change_the_source_weight_unit():
+    result = check(body=BODY.replace("7.650 KG", "7.650 lbs"))
+    assert draft(result).weight_kg_per_unit is None
+    assert draft(result).processing_status == ProcessingStatus.VALIDATION_REQUIRED
+    assert "UNIT_UNSUPPORTED" in codes(result)
+
+
+def test_model_cannot_invent_a_per_unit_basis():
+    result = check(body=BODY.replace("Weight each:", "Weight:"))
+    assert draft(result).weight_kg_per_unit is None
+    assert "WEIGHT_BASIS_UNCLEAR" in codes(result)
+
+
+def test_model_cannot_change_the_source_dimension_unit():
+    body = BODY.replace("6,00 x 2,50 x 3,70 m", "6,00 x 2,50 x 3,70 cm")
+    result = check(body=body)
+    assert draft(result).length_m is None
+    assert draft(result).processing_status == ProcessingStatus.VALIDATION_REQUIRED
+    assert "VALUE_NOT_IN_SOURCE" in codes(result)
+
+
+@pytest.mark.parametrize("alternatives", ["JEDDAH / YANBU", "JEDDAH or YANBU"])
+def test_model_cannot_silently_choose_one_of_the_source_ports(alternatives):
+    result = check(body=BODY.replace("POD: JEDDAH", "POD: " + alternatives), pod="JEDDAH")
+    assert draft(result).pod is None
+    assert "AMBIGUOUS_PORT" in codes(result)
+    assert draft(result).processing_status == ProcessingStatus.VALIDATION_REQUIRED
+
+
+def test_separate_loading_and_discharge_ports_are_not_ambiguous():
+    result = check(body=BODY.replace("POL: GENOA\nPOD: JEDDAH", "POL: GENOA / POD: JEDDAH"))
+    assert (draft(result).pol, draft(result).pod) == ("AAGEN", "BBJED")
+    assert draft(result).processing_status == ProcessingStatus.READY
+
+
+def test_explicit_unresolved_customer_blocks_ready_even_with_a_value():
+    result = validate_extraction(
+        email(), ExtractionResult(intent=MessageIntent.CREATE_BOOKING,
+                                  bookings=[ExtractedBooking(**GOOD)],
+                                  unresolved_fields=["customer"], message_notes="Customer is uncertain"),
+        MASTER)
+    assert "MODEL_UNRESOLVED" in codes(result)
+    assert draft(result).processing_status == ProcessingStatus.VALIDATION_REQUIRED
+
+
+def test_non_finite_localized_number_is_rejected():
+    assert parse_localized_number("9" * 400) is None
+    assert parse_weight("9" * 400 + " KG each").code == "WEIGHT_UNPARSEABLE"
+
+
+def test_a_negative_source_count_cannot_support_a_positive_model_quantity():
+    result = check(body=BODY.replace("2 x TRUCK", "-2 x TRUCK"))
+    assert draft(result).quantity is None
+    assert "VALUE_NOT_IN_SOURCE" in codes(result)
+
+
+def test_an_unresolved_optional_absent_contact_does_not_block_ready():
+    result = validate_extraction(
+        email(), ExtractionResult(intent=MessageIntent.CREATE_BOOKING,
+                                  bookings=[ExtractedBooking(**GOOD)],
+                                  unresolved_fields=["contact_name"]),
+        MASTER)
+    assert draft(result).processing_status == ProcessingStatus.READY
+    issue = next(i for i in result.all_issues if i.code == "MODEL_UNRESOLVED")
+    assert issue.severity == Severity.WARNING

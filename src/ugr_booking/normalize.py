@@ -6,6 +6,7 @@ returns a code instead of a guess, so the validator can ask for review.
 from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date
+import math
 import re
 import unicodedata
 
@@ -59,7 +60,11 @@ def parse_localized_number(text: str) -> float | None:
                 s = before + after
             else:
                 s = before + "." + after
-    return float(s)
+    try:
+        value = float(s)
+    except (ValueError, OverflowError):
+        return None
+    return value if math.isfinite(value) else None
 
 
 # ----------------------------------------------------------------------- weight
@@ -95,6 +100,33 @@ def parse_weight(text: str) -> WeightResult:
         return WeightResult(per_unit=per_unit, code="UNIT_UNSUPPORTED", detail=f"Unit {unit!r} is not converted")
     return WeightResult(per_unit=per_unit, code="UNIT_UNRESOLVED", detail="No weight unit written")
 
+
+
+def weight_expressions(text: str) -> list[str]:
+    """Source number/unit phrases; per-unit markers must come from the same clause."""
+    found = []
+    for match in re.finditer(r"(?<![\w.,])(?:" + _NUMBER + r")(?![\w.,])", text):
+        tail = text[match.end():]
+        unit_match = re.match(r"\s*([A-Za-z]+)", tail)
+        unit = unit_match.group(1) if unit_match else ""
+        after = tail[unit_match.end():] if unit_match else tail
+        before = text[:match.start()]
+        each_before = re.search(
+            r"\b(?:weight|wgt|wt)\s+(?:each|per\s+(?:unit|vehicle|piece))\s*[:=]?\s*$",
+            before, re.IGNORECASE)
+        each_after = re.match(r"\s*(?:each|per\s+(?:unit|vehicle|piece)|c/u|cada\s+uno)\b",
+                              after, re.IGNORECASE)
+        # If the word immediately after the number is itself 'each', it is not a unit.
+        if unit.casefold() in {"each", "per", "cada"}:
+            each_after = True
+        found.append(match.group() + (" " + unit if unit else "")
+                     + (" each" if each_before or each_after else ""))
+    return found
+
+
+def dimension_expressions(text: str) -> list[str]:
+    """Complete source dimension expressions, including the original unit."""
+    return [match.group() for pattern in (_DIMS, _LABELLED_DIMS) for match in pattern.finditer(text)]
 
 # ------------------------------------------------------------------- dimensions
 

@@ -8,7 +8,8 @@ from __future__ import annotations
 import re
 from datetime import date
 from .master_data import MasterIndex
-from .normalize import number_tokens, parse_dimensions, parse_requested_date, parse_weight, squash
+from .normalize import (dimension_expressions, number_tokens, parse_dimensions, parse_requested_date,
+                        parse_weight, squash, weight_expressions)
 from .schemas import (
     BookingDraft, EmailRecord, ExtractedBooking, ExtractionResult, MessageIntent,
     ProcessingStatus, Severity, ValidatedBooking, ValidationIssue, ValidationResult,
@@ -31,20 +32,67 @@ class _Issues:
 
 
 def _in_source(value: str, source: str) -> bool:
-    return squash(value) in source
+    value = squash(value)
+    return bool(value) and re.search(r"(?<!\w)" + re.escape(value) + r"(?!\w)", source) is not None
 
 
 def _numbers_in_source(text: str, source: str) -> bool:
     """The model may reorder words ("900 KG each" for "Weight each: 900 KG"),
     but every number it reports must occur in the e-mail exactly as written."""
     numbers = number_tokens(text)
-    return bool(numbers) and all(n in source for n in numbers)
+    return bool(numbers) and all(n in number_tokens(source) for n in numbers)
 
 
-def _line_with(text: str, lines: list[str]) -> str:
-    """The source line that carries the first number of `text`, for context such as 'each'."""
+
+_QUANTITY_CUE = r"(?:units?|vehicles?|trucks?|cars?|vans?|trailers?|buses|coaches|pieces?|pcs|excavators?|tractors?|machines?|chassis|heads?|SUVs?)"
+_FIELD_LABEL = re.compile(
+    r"\b(POL|POD|port\s+of\s+loading|port\s+of\s+discharge|customer|cargo|quantity|qty|weight|dims?|dimensions?|requested\s+date)\s*[:=]?",
+    re.IGNORECASE)
+_SMALL_COUNTS = {1: "one", 2: "two", 3: "three", 4: "four", 5: "five",
+                 6: "six", 7: "seven", 8: "eight", 9: "nine", 10: "ten"}
+
+
+def _quantity_in_source(quantity: int, lines: list[str]) -> bool:
+    """Require an explicit unit count, not a digit in a VIN, date or reference."""
+    tokens = [str(quantity)]
+    if quantity in _SMALL_COUNTS:
+        tokens.append(_SMALL_COUNTS[quantity])
+    value = r"(?<![\w.,+-])(?:" + "|".join(tokens) + r")(?![\w.,])"
+    patterns = (
+        r"\b(?:qty|quantity|unit\s+count|number\s+of\s+(?:units|vehicles))\s*[:=]?\s*" + value,
+        value + r"\s*(?:x\s*)?(?:(?:used|new|head|heavy|passenger|commercial|pickup|pick-up)\s+)*" + _QUANTITY_CUE + r"\b",
+        value + r"\s*[x\u00d7]\s+[A-Za-z]",
+    )
+    return any(re.search(pattern, line, re.IGNORECASE) for line in lines for pattern in patterns)
+
+
+def _source_port_is_ambiguous(field: str, lines: list[str], master: MasterIndex) -> bool:
+    labels = {"pol": {"pol", "port of loading"}, "pod": {"pod", "port of discharge"}}
+    for line in lines:
+        matches = list(_FIELD_LABEL.finditer(line))
+        for index, label in enumerate(matches):
+            if squash(label.group(1)) not in labels[field]:
+                continue
+            end = matches[index + 1].start() if index + 1 < len(matches) else len(line)
+            clause = line[label.end():end].split("|", 1)[0]
+            ports = {code for code, _, _ in master.find_in_text(clause)[1]}
+            if len(ports) > 1 and re.search(r"/|\bor\b|\bveya\b", clause, re.IGNORECASE):
+                return True
+    return False
+
+
+def _source_weight(text: str, lines: list[str]):
+    """Resolve the model's number against original number/unit/basis evidence."""
     numbers = number_tokens(text)
-    return next((line for line in lines if numbers and numbers[0] in line), "")
+    evidence = [parse_weight(phrase) for line in lines for phrase in weight_expressions(line)
+                if number_tokens(phrase) == numbers]
+    valid = [item for item in evidence if not item.code]
+    if valid:
+        # Conflicting source statements are not resolved by picking the model's favourite.
+        if len({(item.kg, item.per_unit) for item in valid}) > 1:
+            return None
+        return valid[0]
+    return evidence[0] if evidence else None
 
 
 def _vin_shape(vin: str) -> str:
@@ -52,10 +100,19 @@ def _vin_shape(vin: str) -> str:
 
 
 def _validate_booking(raw: ExtractedBooking, index: int, email: EmailRecord, source: str, lines: list[str],
-                      master: MasterIndex, intent: MessageIntent, email_blocked: bool) -> ValidatedBooking:
+                      master: MasterIndex, intent: MessageIntent, email_blocked: bool,
+                      unresolved_fields: tuple[str, ...] = ()) -> ValidatedBooking:
     partial = intent != MessageIntent.CREATE_BOOKING
     issues = _Issues(index)
     out: dict = {}
+    aliases = {"requested_date_text": "requested_date", "weight_text": "weight_kg_per_unit",
+               "dimensions_text": "dimensions", "cargo": "cargo_description"}
+    for field in unresolved_fields:
+        name = aliases.get(field.strip().casefold(), field.strip().casefold())
+        if name in CRITICAL_FIELDS or hasattr(raw, field):
+            supplied = getattr(raw, field, None)
+            severity = Severity.ERROR if name in CRITICAL_FIELDS or supplied or partial else Severity.WARNING
+            issues.add("MODEL_UNRESOLVED", name, f"The model explicitly marked {name} as unresolved", severity)
 
     def missing(field: str, label: str | None = None) -> None:
         if not partial:
@@ -72,7 +129,12 @@ def _validate_booking(raw: ExtractedBooking, index: int, email: EmailRecord, sou
     if raw.customer:
         match = master.match_customer(raw.customer)
         if match.status == "matched":
-            out["customer"] = match.value
+            customer_source = " ".join([email.subject, email.clean_body, email.quoted_body, email.sender or ""])
+            supported = {name for name, _, _ in master.find_in_text(customer_source)[0]}
+            if match.value in supported:
+                out["customer"] = match.value
+            else:
+                issues.add("VALUE_NOT_IN_SOURCE", "customer", "Customer is known but is not stated in this e-mail")
         elif match.status == "ambiguous":
             issues.add("AMBIGUOUS_CUSTOMER", "customer", f"Customer matches several master records: {', '.join(match.candidates)}")
         else:
@@ -85,6 +147,8 @@ def _validate_booking(raw: ExtractedBooking, index: int, email: EmailRecord, sou
         text = getattr(raw, field)
         if not text:
             missing(field, "Port of loading" if field == "pol" else "Port of discharge")
+        elif _source_port_is_ambiguous(field, lines, master):
+            issues.add("AMBIGUOUS_PORT", field, f"The source {field.upper()} clause names alternative ports")
         elif not _in_source(text, source):
             issues.add("VALUE_NOT_IN_SOURCE", field, f"{field.upper()} value does not occur in the e-mail text")
         else:
@@ -100,13 +164,18 @@ def _validate_booking(raw: ExtractedBooking, index: int, email: EmailRecord, sou
 
     # --- cargo and quantity ----------------------------------------------
     if raw.cargo_description and raw.cargo_description.strip():
-        out["cargo_description"] = raw.cargo_description.strip()
+        if _in_source(raw.cargo_description, source):
+            out["cargo_description"] = raw.cargo_description.strip()
+        else:
+            issues.add("VALUE_NOT_IN_SOURCE", "cargo_description", "Cargo description is not stated in the e-mail")
     else:
         missing("cargo_description", "Cargo description")
     if raw.quantity is None:
         missing("quantity", "Quantity")
-    elif raw.quantity <= 0:
-        issues.add("INVALID_QUANTITY", "quantity", "Quantity must be a positive whole number")
+    elif not 0 < raw.quantity <= 2**63 - 1:
+        issues.add("INVALID_QUANTITY", "quantity", "Quantity must be positive and fit a signed 64-bit integer")
+    elif not _quantity_in_source(raw.quantity, lines):
+        issues.add("VALUE_NOT_IN_SOURCE", "quantity", "Quantity is not an explicit unit count in the e-mail")
     else:
         out["quantity"] = raw.quantity
 
@@ -140,11 +209,16 @@ def _validate_booking(raw: ExtractedBooking, index: int, email: EmailRecord, sou
             issues.add("VALUE_NOT_IN_SOURCE", "weight_kg_per_unit", "Weight number does not occur in the e-mail")
         else:
             weight = parse_weight(raw.weight_text)
-            # "each" may sit in the source label ("Weight each: 900 KG") rather than in the model's phrase.
-            per_unit = weight.per_unit or parse_weight(_line_with(raw.weight_text, lines) or "0").per_unit
+            evidence = _source_weight(raw.weight_text, lines)
             if weight.code:
                 issues.add(weight.code, "weight_kg_per_unit", weight.detail)
-            elif raw.quantity not in (None, 1) and not per_unit:
+            elif evidence is None:
+                issues.add("VALUE_NOT_IN_SOURCE", "weight_kg_per_unit", "No unambiguous source weight supports this value")
+            elif evidence.code:
+                issues.add(evidence.code, "weight_kg_per_unit", evidence.detail)
+            elif evidence.kg != weight.kg:
+                issues.add("VALUE_NOT_IN_SOURCE", "weight_kg_per_unit", "Model weight/unit differs from the source")
+            elif raw.quantity not in (None, 1) and not evidence.per_unit:
                 issues.add("WEIGHT_BASIS_UNCLEAR", "weight_kg_per_unit",
                            "Weight is not marked 'each'; it may be a total, so it is not stored per unit",
                            Severity.WARNING)
@@ -162,7 +236,14 @@ def _validate_booking(raw: ExtractedBooking, index: int, email: EmailRecord, sou
             if dims.code:
                 issues.add(dims.code, "dimensions", dims.detail)
             else:
-                out.update(length_m=dims.length_m, width_m=dims.width_m, height_m=dims.height_m)
+                evidence = [parse_dimensions(phrase) for line in lines for phrase in dimension_expressions(line)
+                            if number_tokens(phrase) == number_tokens(raw.dimensions_text)]
+                expected = (dims.length_m, dims.width_m, dims.height_m)
+                supported = [(item.length_m, item.width_m, item.height_m) for item in evidence if not item.code]
+                if supported and set(supported) == {expected}:
+                    out.update(length_m=dims.length_m, width_m=dims.width_m, height_m=dims.height_m)
+                else:
+                    issues.add("VALUE_NOT_IN_SOURCE", "dimensions", "Model dimensions/unit differ from the source")
     elif not partial:
         issues.add("DIMENSIONS_MISSING", "dimensions", "No dimensions are stated", Severity.WARNING)
 
@@ -190,16 +271,24 @@ def _validate_booking(raw: ExtractedBooking, index: int, email: EmailRecord, sou
     for field in ("vessel", "rate_text", "contact_name"):
         value = getattr(raw, field)
         if value and value.strip():
-            out[field] = value.strip()
+            if _in_source(value, source):
+                out[field] = value.strip()
+            else:
+                issues.add("VALUE_NOT_IN_SOURCE", field, f"{field} is not stated in the e-mail")
     if raw.voyage and raw.voyage.strip():
-        if any(ch.isdigit() for ch in raw.voyage):
+        if not _in_source(raw.voyage, source):
+            issues.add("VALUE_NOT_IN_SOURCE", "voyage", "Voyage is not stated in the e-mail")
+        elif any(ch.isdigit() for ch in raw.voyage):
             out["voyage"] = raw.voyage.strip()
         else:
             issues.add("VOYAGE_UNRECOGNISED", "voyage",
                        f"'{raw.voyage.strip()}' does not look like a voyage number and was not stored", Severity.WARNING)
     if raw.contact_email:
         if _EMAIL.fullmatch(raw.contact_email.strip()):
-            out["contact_email"] = raw.contact_email.strip()
+            if _in_source(raw.contact_email, squash(source + " " + (email.sender or ""))):
+                out["contact_email"] = raw.contact_email.strip()
+            else:
+                issues.add("VALUE_NOT_IN_SOURCE", "contact_email", "Contact e-mail is not stated in the source")
         else:
             issues.add("CONTACT_EMAIL_INVALID", "contact_email", "Contact e-mail is not a valid address", Severity.WARNING)
 
@@ -253,7 +342,8 @@ def validate_extraction(email: EmailRecord, extraction: ExtractionResult, master
                              f"{intent.value} never creates bookings; extracted booking details were ignored", Severity.WARNING)
 
     validated = tuple(
-        _validate_booking(raw, i, email, source, lines, master, intent, email_blocked) for i, raw in enumerate(keep)
+        _validate_booking(raw, i, email, source, lines, master, intent, email_blocked,
+                          tuple(extraction.unresolved_fields)) for i, raw in enumerate(keep)
     )
     return ValidationResult(
         email_id=email.email_id, intent=intent, bookings=validated, target_booking_ref=target,
