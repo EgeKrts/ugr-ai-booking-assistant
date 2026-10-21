@@ -58,15 +58,24 @@ tool yapar. Sistemin emin olmadığı hiçbir şey tahmin edilmez, review için 
 
 macOS/Linux: `python3` ve `.venv/bin/python` ile aynı komutların çalışması beklenir; yalnızca Windows'ta denendi.
 
-**LLM yok mu?** Bunun yerine kaydedilmiş bir LLM çıktısını replay et (live AI olmadığı açıkça yazılır) ve chatbot'u
-keyword interpreter ile kullan:
+**GPU veya Ollama yok mu?** Üç seçenek var:
 
-```powershell
-.\.venv\Scripts\python.exe -m ugr_booking.cli ingest --extractions data/private/extractions
-$env:UGR_CHAT_PLANNER = "keywords"
-```
+- **Testler LLM gerektirmez** (`pytest -q`). Dataset yoksa dataset'e bağlı testler atlanır, geri kalanı çalışır.
+- **Replay:** LLM çıktısı `record-extractions` ile bir kez kaydedilir ve `ingest --extractions <klasör>` ile LLM olmadan
+  tekrar işlenir (live AI olmadığı açıkça yazılır). Chatbot'u keyword interpreter ile kullan:
 
-(Recording, `record-extractions` ile bir kez alınır ve dataset gibi local kalır.)
+  ```powershell
+  .\.venv\Scripts\python.exe -m ugr_booking.cli ingest --extractions data/private/extractions
+  $env:UGR_CHAT_PLANNER = "keywords"
+  ```
+
+  Dataset'in gerçek e-postalarından gelen kayıt gizli veri sayılır ve repoda **yoktur**; GPU'su olmayan biri bu kaydı
+  yazardan isteyebilir ya da modeli CPU üzerinde çalıştırabilir (denenmedi, çok yavaş olması beklenir).
+- **Follow-up demo'su:** `examples/demo_recording` yalnızca uydurma `examples/demo_inbox` e-postalarının kaydıdır. Ana
+  booking'ler olmadan bu altı e-posta `BOOKING_NOT_FOUND` ile review'a düşer; bu beklenen davranıştır.
+
+Sabit demo akışı (`scripts/demo.ps1`, [docs/demo_akisi.md](docs/demo_akisi.md)) model olmadan da çalışan `followup-offline`
+ve `dashboard -Offline` adımlarını içerir, ama ana veritabanını hazırlamak için önce bir ingest gerekir.
 
 ## Mimari
 
@@ -140,9 +149,8 @@ Booking status'ları: `READY` (validation'dan geçti), `VALIDATION_REQUIRED` (bi
 
 ## Güvensiz veya belirsiz girdi nasıl ele alınıyor
 
-- **Hiçbir şey uydurulmaz.** Eksik değerler boş kalır ve `MISSING_FIELD` olarak görünür. LLM'in döndürdüğü bir değer e-posta
-  metninde geçmek zorundadır; geçmiyorsa reddedilir (`VALUE_NOT_IN_SOURCE`). Bu, injected değerleri de durdurur.
-- **Belirsizlik çözülmez, korunur.** `JEDDAH / YANBU`, `SEPTEMBER SAILING`, `next available after 25/11/2026`,
+- **Kaynak kanıtı aranır.** Eksik değerler boş kalır; modelin yazdığı alanlar doğrudan kabul edilmez. Müşteri için metin/gönderen içindeki master-data alias'ı, adet için açık bir birim adedi ve diğer alanlar için kaynak metin kontrol edilir. Ağırlık ve ölçülerin birimi kaynaktaki ifadeyle karşılaştırılır. Desteklenmeyen değerler `VALUE_NOT_IN_SOURCE` ile incelemeye bırakılır.
+- **Belirsizlik görünür kalır.** POL/POD satırındaki alternatifler model tek liman seçse de kontrol edilir; kritik `unresolved_fields` bildirimi review gerektirir. `JEDDAH / YANBU`, `SEPTEMBER SAILING`, `next available after 25/11/2026`,
   birimsiz bir ağırlık ve `6,20 x 2.450 x 3,10 m` unresolved kalır ve booking validation bekler.
 - **Invalid değerler düzeltilmez** (`31/02/2026` invalid kalır).
 - **E-posta metni untrusted'dır.** Quoted history yalnızca bağlam olarak verilir; sisteme hitap eden paragraflar
@@ -156,7 +164,7 @@ Booking status'ları: `READY` (validation'dan geçti), `VALIDATION_REQUIRED` (bi
   draft'tan gelir.
 - **Chatbot read-only'dir** (write intent'i yoktur ve cevap verirken bağlantısı read-only'dir). Bilinmeyen bir müşteri
   veya liman boş cevap verir, asla "tüm booking'ler" değil.
-- **Her e-posta tek bir transaction'dır.** Bir hata o e-postayı rollback eder, kaydedilir ve batch devam eder.
+- **Her e-posta ayrı işlenir.** Çıkarım ve validation hatası o e-postaya kaydedilir; diğer girdiler devam eder. Yazma adımı tek transaction'dır ve hata halinde rollback edilir. Sonlu olmayan sayılar kabul edilmez.
 
 ## Komutlar
 
@@ -234,7 +242,10 @@ RTX 4060 üzerinde `qwen3:8b` ile ölçüldü (ayrıntılar [docs/run_record.md]
   (bir e-postada voyage warning'i) farklıydı. `ingest` komutunu tekrar çalıştırmak hiçbir şey eklemez.
 - Süre: LLM extraction'ı e-posta başına yaklaşık 7,5 saniye sürer (34'ü için 256 saniye); LLM'in tool seçtiği tam bir `ingest`
   tekrarlanan çalıştırmalarda 6 ila 9 dakika sürdü; API maliyeti yok.
-- LLM olmadan 320 test, `--live` ile 342 test geçiyor.
+- Son düzeltmelerle LLM çağırmadan **337 test geçti, 22 canlı model testi atlandı**. `--live` ile bu 22 test de geçti.
+  Düzeltmelerden sonra 34 e-postanın tamamı canlı modelle yeniden işlendi: her e-postanın intent ve status'ü aynı kaldı
+  (23 booking, 8 `READY`, 14 `VALIDATION_REQUIRED`, 1 `CANCELLED`); tek fark `EMAIL-001`'in adedi: e-posta adedi yazmadığı
+  için artık boş kalıyor.
 
 ## Test
 
