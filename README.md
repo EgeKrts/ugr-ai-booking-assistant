@@ -292,3 +292,51 @@ tests/             Unit, end-to-end, scenario, live ve repo hijyen testleri
 docs/              Adım notları, run kaydı, setup kararları
 data/private/      Dataset ve local recording'ler (Git dışında)
 ```
+
+## Ekran görüntüleri
+
+Aşağıdaki görüntüler, verilen 34 sentetik e-postanın `qwen3:8b` ile canlı işlenmesinden oluşan veritabanından alındı
+(23 booking: 8 `READY`, 14 `VALIDATION_REQUIRED`, 1 `CANCELLED`). Ham e-posta metni gösterilmez.
+
+### Overview
+
+KPI'lar (toplam, hazır, validation bekleyen, iptal edilen), e-posta bazlı sayılar (booking olmayan e-postalar, status
+sorguları, uygulanamayan talepler) ve status, müşteri, POL, POD ve rota kırılımları. Sol taraftaki filtreler booking
+rakamlarını ve grafikleri değiştirir.
+
+![Overview sekmesi](docs/screenshots/01-overview.png)
+
+### Bookings
+
+Filtrelenebilir booking tablosu: amber satırlar validation bekler, gri italik satırlar iptal edilmiştir. Bir satır
+seçilince detay, validation issue'ları ve history açılır.
+
+![Bookings sekmesi](docs/screenshots/02-bookings.png)
+
+### Booking detayı
+
+`BKG-00012` örneği: e-postada 4 adet yazıyor ama 5 VIN listelenmiş. Sistem bunu düzeltmeye çalışmaz; `VIN_COUNT_MISMATCH`
+issue'su açar ve booking `VALIDATION_REQUIRED` olarak kalır. Kaynak e-posta ve VIN listesi açılır panellerdedir.
+
+![Booking detayı](docs/screenshots/03-booking-detail.png)
+
+### Needs attention
+
+Her booking'in neden validation gerektirdiği (`UNKNOWN_PORT`, `INVALID_DATE`, `AMBIGUOUS_DATE`, `PROMPT_INJECTION_SUSPECTED`
+gibi kodlarla) ve uygulanamayan talepler (kayıtlı olmayan bir booking'e gelen update ve cancel e-postaları).
+
+![Needs attention sekmesi](docs/screenshots/04-needs-attention.png)
+
+### E-mails
+
+İşlenen her e-posta, booking olmayanlar dahil. Detected intent filtresi ve arama vardır; örnekte `NON_BOOKING`,
+`STATUS_INQUIRY` ve `UNKNOWN` e-postaları listelenir.
+
+![E-mails sekmesi](docs/screenshots/05-emails.png)
+
+### Chat
+
+Salt okunur chatbot. Cevap yalnızca veritabanındaki satırlardan üretilir ve dashboard'u da filtreler ve highlight eder:
+örnekte "Show bookings with Izmir as the port of loading." sorusu cevabı gösterir ve Port of loading filtresini uygular.
+
+![Chat sekmesi](docs/screenshots/06-chat.png)
